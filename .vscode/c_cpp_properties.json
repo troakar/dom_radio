@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Windows",
+            "includePath": [
+                "${workspaceFolder}/Shared",
+                "${workspaceFolder}/modules/JUCE/modules",
+                "${workspaceFolder}/build/Plugins/DomRadio_Master/DomRadioMaster_artefacts/JuceLibraryCode",
+                "${workspaceFolder}/build"
+            ],
+            "defines": [
+                "JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1"
+            ],
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-msvc-x64"
+        }
+    ],
+    "version": 4
+}

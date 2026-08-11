@@ -1,0 +1,28 @@
+# CMake / Build outputs
+build/
+build_win/
+build_mac/
+cmake-build-*/
+out/
+
+# Visual Studio / MSVC
+.vs/
+*.vcxproj.user
+*.suo
+*.user
+*.sln.docstates
+
+# Xcode / macOS
+*.xcodeproj/
+*.xcworkspace/
+.DS_Store
+
+# JUCE Generated
+JUCE/
+
+# Binary artifacts
+*.vst3
+*.component
+*.exe
+*.dll
+*.dylib
