@@ -30,13 +30,9 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: microsoft/setup-msbuild@v2
 
-      # 3. Конфигурируем CMake. 
-      # Для macOS принудительно выставляем сборку Universal Binary (arm64 + x86_64)
+      # 3. Конфигурируем CMake одной строкой (безопасно для Windows PowerShell и macOS Bash)
       - name: Configure CMake
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            ${{ matrix.os == 'macos-latest' && '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"' || '' }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.os == 'macos-latest' && '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"' || '' }}
 
       # 4. Запускаем компиляцию в многопоточном режиме (Release)
       - name: Build
