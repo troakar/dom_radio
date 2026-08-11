@@ -57,14 +57,14 @@ jobs:
           name: dom-radio-mac
           path: dom-radio-mac.zip
 
-      # 7. Собираем готовые плагины для Windows (VST3 и Standalone .exe)
+      # 7. Собираем готовые плагины для Windows (VST3 и Standalone .exe) с фильтрацией родительских папок
       - name: Package Windows Artifacts
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/win
-          Get-ChildItem -Path build -Recurse -Filter "*.vst3" | Where-Object { $_.FullName -like "*\Release\*" -and $_.FullName -notlike "*\CMakeFiles\*" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Recurse -Force }
-          Get-ChildItem -Path build -Recurse -Filter "*.exe" | Where-Object { $_.FullName -like "*\Release\*" -and $_.FullName -notlike "*\CMakeFiles\*" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Force }
+          Get-ChildItem -Path build -Recurse -Directory -Filter "*.vst3" | Where-Object { $_.Parent.Name -eq "VST3" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Recurse -Force }
+          Get-ChildItem -Path build -Recurse -File -Filter "*.exe" | Where-Object { $_.Parent.Name -eq "Standalone" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Force }
           Compress-Archive -Path dist/win -DestinationPath dom-radio-win.zip
 
       # 8. Отправляем ZIP-архив Windows на сервер GitHub
