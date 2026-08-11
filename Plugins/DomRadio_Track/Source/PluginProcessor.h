@@ -65,6 +65,7 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     int getRequestedOversamplingIndex() const noexcept;
+    void resetCacheVariables();
     void resetProcessingState();
     void timerCallback() override;
 

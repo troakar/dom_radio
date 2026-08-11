@@ -316,6 +316,41 @@ void DomRadioTrackAudioProcessor::prepareToPlay (double sampleRate, int samplesP
     ageSmoothed.setCurrentAndTargetValue(ageParam ? ageParam->load() : 0.0f);
     
     resetProcessingState();
+
+    // === ИСПРАВЛЕНИЕ: Мгновенный пересчет всех фильтров под новый оверсэмплинг ===
+    resetCacheVariables();
+
+    const float initSpeedIps = tapeSpeedParam ? tapeSpeedParam->load() : 15.0f;
+    const float initSpeedNorm = TroakarDSP::TapesDSP::speedIpsToNorm(initSpeedIps) * 0.75f;
+    const int initEqStd = eqStdParam ? static_cast<int>(eqStdParam->load()) : 0;
+    const int initTapeModel = tapeModelParam ? static_cast<int>(tapeModelParam->load()) : 0;
+    const auto initTapeProfile = TroakarDSP::TapesDSP::getBalancedProfile(initTapeModel);
+    const float initAirGain = airParam ? airParam->load() : 0.0f;
+    const float initMixAmount = mixParam ? mixParam->load() / 100.0f : 1.0f;
+    const float initAge = ageParam ? ageParam->load() : 0.0f;
+
+    wetChainL.eq.updateParameters(initSpeedNorm, initEqStd, initAirGain, 0.0f, initAge, initTapeProfile, initMixAmount);
+    wetChainR.eq.updateParameters(initSpeedNorm, initEqStd, initAirGain, 0.0f, initAge, initTapeProfile, initMixAmount);
+    wetChainL.trans.updateParameters(initMixAmount);
+    wetChainR.trans.updateParameters(initMixAmount);
+    wetChainL.tapeProfile.updateProfile(initTapeProfile);
+    wetChainR.tapeProfile.updateProfile(initTapeProfile);
+
+    const float initBass = bassParam ? bassParam->load() * initMixAmount : 0.0f;
+    const float initTreble = trebleParam ? trebleParam->load() * initMixAmount : 0.0f;
+    const float initBassFreq = bassFreqParam ? bassFreqParam->load() : 60.0f;
+    const float initTrebleFreq = trebleFreqParam ? trebleFreqParam->load() : 10000.0f;
+
+    wetChainL.pultec.updateCoefficients(initBass, initTreble, initBassFreq, initTrebleFreq);
+    wetChainR.pultec.updateCoefficients(initBass, initTreble, initBassFreq, initTrebleFreq);
+
+    const float initPreBass = preBassParam ? preBassParam->load() * initMixAmount : 0.0f;
+    const float initPreTreble = preTrebleParam ? preTrebleParam->load() * initMixAmount : 0.0f;
+    const float initPreBassFreq = preBassFreqParam ? preBassFreqParam->load() : 100.0f;
+    const float initPreTrebleFreq = preTrebleFreqParam ? preTrebleFreqParam->load() : 5000.0f;
+
+    wetChainL.emphasis.updateCoefficients(initPreBass, initPreTreble, initPreBassFreq, initPreTrebleFreq);
+    wetChainR.emphasis.updateCoefficients(initPreBass, initPreTreble, initPreBassFreq, initPreTrebleFreq);
 }
 
 void DomRadioTrackAudioProcessor::releaseResources() {}
@@ -323,6 +358,24 @@ void DomRadioTrackAudioProcessor::releaseResources() {}
 int DomRadioTrackAudioProcessor::getRequestedOversamplingIndex() const noexcept
 {
     return juce::jlimit(0, 2, static_cast<int>(oversamplingParam->load()));
+}
+
+void DomRadioTrackAudioProcessor::resetCacheVariables()
+{
+    lastTapeSpeed = -999.0f;
+    lastEqStd = -1;
+    lastTapeModel = -1;
+    lastAirGain = -999.0f;
+    lastMixAmount = -1.0f;
+    lastAge = -999.0f;
+    lastBass = -999.0f;
+    lastTreble = -999.0f;
+    lastBassFrequency = -999.0f;
+    lastTrebleFrequency = -999.0f;
+    lastPreBass = -999.0f;
+    lastPreTreble = -999.0f;
+    lastPreBassFreq = -999.0f;
+    lastPreTrebleFreq = -999.0f;
 }
 
 void DomRadioTrackAudioProcessor::resetProcessingState()
