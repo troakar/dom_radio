@@ -1253,17 +1253,17 @@ public:
         if (phaseW >= 1.0f) phaseW -= 1.0f;
         const float wowPeriodic = std::sin(phaseW * juce::MathConstants<float>::twoPi) * 0.4f * wowScale;
 
-        // [ИЗМЕНЕНИЕ]: Умножаем сумму периодического LFO и хаотичного дрейфа на 1.60f (+60%)
+        // [ИЗМЕНЕНИЕ]: Умножаем сумму периодического LFO и хаотичного дрейфа на 1.90f
         // Это сделает "плавание" питча значительно более выраженным на максимальных значениях ручки
-        const float wowTarget = (wowPeriodic + juce::jlimit(-2.0f, 2.0f, driftY - wowScale)) * 1.60f;
+        const float wowTarget = (wowPeriodic + juce::jlimit(-2.0f, 2.0f, driftY - wowScale)) * 1.90f;
         const float inertia = 0.82f + speedNorm * 0.10f;
         wowMomentum = inertia * wowMomentum + (1.0f - inertia) * wowTarget;
 
         // --- 2. FLUTTER: CHOW TAPE SIMPLIFIED ---
         const float flutterFreqVar = tolerances ? tolerances->flutterFrequencyDrift : 1.0f;
-        // [ИЗМЕНЕНИЕ 1]: Уменьшаем частоту флаттера на 40% (множитель 0.60f)
+        // [ИЗМЕНЕНИЕ 1]: Уменьшаем частоту флаттера на 20% (множитель 0.80f)
         // Теперь флаттер звучит не как механическое "жужжание", а как быстрое, но читаемое дрожание ленты
-        const float flutterBaseFreq = (7.0f + speedRoot * 20.0f) * flutterFreqVar * 0.60f;
+        const float flutterBaseFreq = (7.0f + speedRoot * 20.0f) * flutterFreqVar * 0.80f;
 
         const float dTheta1 = juce::MathConstants<float>::twoPi * flutterBaseFreq * T;
         
@@ -1304,19 +1304,22 @@ class OxideDropouts {
 public:
     void prepare(double newSampleRate) {
         sampleRate = newSampleRate;
-        currentGain = targetGain = 1.0f;
+        currentGainL = currentGainR = targetGainL = targetGainR = 1.0f;
         samplesUntilNextDropout = 0;
         dropoutSamplesRemaining = 0;
         clusterRemaining = 0;
     }
 
-    forcedinline float process(float input, float oxideAmount, float age) {
+    forcedinline void process(float& inputL, float& inputR, float oxideAmount, float age) {
         const float oxideNorm = juce::jlimit(0.0f, 1.0f, oxideAmount / 10.0f);
         const float ageNorm = juce::jlimit(0.0f, 1.0f, age / 50.0f);
         
         if (oxideNorm <= 0.0f) { 
-            currentGain += (1.0f - currentGain) * 0.01f; 
-            return input * currentGain; 
+            currentGainL += (1.0f - currentGainL) * 0.01f; 
+            currentGainR += (1.0f - currentGainR) * 0.01f; 
+            inputL *= currentGainL;
+            inputR *= currentGainR;
+            return; 
         }
 
         if (samplesUntilNextDropout <= 0 && dropoutSamplesRemaining <= 0) {
@@ -1340,29 +1343,41 @@ public:
             const int duration = static_cast<int>(randomFloat(rng, 0.01f, 0.15f) * sampleRate);
             dropoutSamplesRemaining = juce::jmax(1, duration);
             
-            const float depthDb = randomFloat(rng, 3.0f, 14.0f) * oxideNorm * (1.0f + 1.2f * ageNorm);
-            targetGain = juce::Decibels::decibelsToGain(-depthDb);
+            const float baseDepthDb = randomFloat(rng, 3.0f, 12.0f) * oxideNorm * (1.0f + 1.2f * ageNorm);
+            const float lrBias = randomFloat(rng, -1.0f, 1.0f);
+            
+            targetGainL = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb + lrBias));
+            targetGainR = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb - lrBias));
             
             if (clusterRemaining > 0) --clusterRemaining;
         }
         
         if (dropoutSamplesRemaining > 0) {
             --dropoutSamplesRemaining;
-            if (dropoutSamplesRemaining == 0) targetGain = 1.0f;
+            if (dropoutSamplesRemaining == 0) {
+                targetGainL = 1.0f;
+                targetGainR = 1.0f;
+            }
         } 
         
-        const float coeff = (targetGain < currentGain) ? 0.08f : 0.0015f;
-        currentGain += (targetGain - currentGain) * coeff;
+        const float coeffL = (targetGainL < currentGainL) ? 0.08f : 0.008f;
+        const float coeffR = (targetGainR < currentGainR) ? 0.08f : 0.008f;
         
-        return input * currentGain;
+        currentGainL += (targetGainL - currentGainL) * coeffL;
+        currentGainR += (targetGainR - currentGainR) * coeffR;
+        
+        inputL *= currentGainL;
+        inputR *= currentGainR;
     }
 
-    float getCurrentGain() const noexcept { return currentGain; }
+    float getCurrentGainL() const noexcept { return currentGainL; }
+    float getCurrentGainR() const noexcept { return currentGainR; }
 
     void setSeed(uint32_t seed) { rng.setSeed(seed); }
 
 private:
-    float currentGain = 1.0f, targetGain = 1.0f;
+    float currentGainL = 1.0f, currentGainR = 1.0f;
+    float targetGainL = 1.0f, targetGainR = 1.0f;
     int samplesUntilNextDropout = 0, dropoutSamplesRemaining = 0;
     int clusterRemaining = 0;
     double sampleRate = 44100.0;

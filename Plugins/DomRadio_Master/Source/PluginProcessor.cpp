@@ -322,7 +322,8 @@ void DomRadioMasterAudioProcessor::prepareToPlay (double sampleRate, int samples
     
     mechL.prepare(sampleRate, (int)maxExpectedBlock);  
     mechR.prepare(sampleRate, (int)maxExpectedBlock);
-    dropL.prepare(sampleRate);  dropR.prepare(sampleRate);
+    dropouts.prepare(sampleRate);
+    dropouts.setSeed(2026);
     wowGenL.prepare(sampleRate); wowGenR.prepare(sampleRate);
     wowGenL.setSeed(1984); wowGenR.setSeed(4891);
     humGen.prepare(sampleRate);
@@ -336,7 +337,7 @@ void DomRadioMasterAudioProcessor::prepareToPlay (double sampleRate, int samples
     contactL.prepare(sampleRate); contactR.prepare(sampleRate);
     noiseDecayFilterL.prepare(sampleRate); noiseDecayFilterR.prepare(sampleRate);
 
-    dropL.setSeed(2026); dropR.setSeed(6202);
+    dropouts.setSeed(2026);
     wetChainL.scrape.setSeed(42);
     wetChainR.scrape.setSeed(24);
 
@@ -478,6 +479,8 @@ struct ThermalState {
     float dropoutMult         = 1.0f;
     float scrapeMult          = 1.0f;
     float ironHarmonicsFactor = 1.0f;
+    float hfWarmthDb          = 0.0f;
+    float wowFlutterMult      = 1.0f;
 };
 
 ThermalState computeThermal(float tempC, TroakarDSP::DriveType driveType) noexcept
@@ -485,16 +488,21 @@ ThermalState computeThermal(float tempC, TroakarDSP::DriveType driveType) noexce
     ThermalState s;
     const float dHot = juce::jmax(0.0f, (tempC - 25.0f) / 25.0f);
     const float dCold = juce::jmax(0.0f, (25.0f - tempC) / 10.0f);
-    const float smoothHot = std::pow(dHot, 1.3f);
+    const float smoothHot = std::pow(dHot, 1.2f);
+    const float smoothCold = std::pow(dCold, 1.2f);
 
-    s.coercivityFactor = 1.0f - smoothHot * 0.05f + dCold * 0.03f;
-    s.biasOffset = -smoothHot * 0.04f + dCold * 0.01f;
-    s.speedFactor = 1.0f + (smoothHot - dCold * 0.5f) * 0.0003f;
-    s.hfeFactor = driveType == TroakarDSP::DriveType::germanium ? 
-                  1.0f + smoothHot * 0.35f - dCold * 0.08f : 1.0f + smoothHot * 0.15f - dCold * 0.04f;
-    s.ironHarmonicsFactor = 1.0f + smoothHot * 0.25f;
-    s.dropoutMult = 1.0f + dCold * 0.45f;
-    s.scrapeMult  = 1.0f + smoothHot * 0.45f;
+    s.coercivityFactor = 1.0f - smoothHot * 0.15f + smoothCold * 0.08f;
+    s.biasOffset = -smoothHot * 0.08f + smoothCold * 0.03f;
+
+    s.hfeFactor = (driveType == TroakarDSP::DriveType::germanium)
+        ? 1.0f + smoothHot * 0.75f - smoothCold * 0.20f
+        : 1.0f + smoothHot * 0.40f - smoothCold * 0.10f;
+
+    s.ironHarmonicsFactor = 1.0f + smoothHot * 0.65f;
+    s.dropoutMult = 1.0f + smoothCold * 1.20f;
+    s.scrapeMult  = 1.0f + smoothHot * 0.80f;
+    s.wowFlutterMult = 1.0f + smoothHot * 0.40f + smoothCold * 0.15f;
+    s.hfWarmthDb = -smoothHot * 2.2f;
 
     return s;
 }
@@ -636,6 +644,8 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float thermalPreampDrive  = juce::jlimit(1.0f, 12.0f, effectivePreampDrive * thermal.hfeFactor);
     const float thermalSpeedNorm    = juce::jlimit(0.0f, 1.0f, tapeSpeedNorm * thermal.speedFactor);
 
+    const float effectiveAirGain = juce::jmax(0.0f, airGain + thermal.hfWarmthDb);
+
     wetChainL.eq.updateBiasResponse(thermalBias, thermalSpeedNorm, effMix);
     wetChainR.eq.updateBiasResponse(thermalBias, thermalSpeedNorm, effMix);
 
@@ -702,12 +712,12 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
         auto* osR = osBlock.getChannelPointer(1);
 
         if (tapeSpeedNorm != lastTapeSpeed || eqStd != lastEqStd || tapeModel != lastTapeModel
-            || std::abs(airGain - lastAirGain) > 0.005f || std::abs(decay - lastDecay) > 0.005f
+            || std::abs(effectiveAirGain - lastAirGain) > 0.005f || std::abs(decay - lastDecay) > 0.005f
             || std::abs(currentAgeForScrape - lastAge) > 0.05f || std::abs(effMix - lastMixAmount) > 0.005f)
         {
             isEqUpdating.store(true, std::memory_order_release);
-            wetChainL.eq.updateParameters(tapeSpeedNorm, eqStd, airGain, decay, currentAgeForScrape, tapeProfile, effMix);
-            wetChainR.eq.updateParameters(tapeSpeedNorm, eqStd, airGain, decay, currentAgeForScrape, tapeProfile, effMix);
+            wetChainL.eq.updateParameters(tapeSpeedNorm, eqStd, effectiveAirGain, decay, currentAgeForScrape, tapeProfile, effMix);
+            wetChainR.eq.updateParameters(tapeSpeedNorm, eqStd, effectiveAirGain, decay, currentAgeForScrape, tapeProfile, effMix);
             wetChainL.trans.updateParameters(effMix);
             wetChainR.trans.updateParameters(effMix);
             wetChainL.tapeProfile.updateProfile(tapeProfile);
@@ -715,7 +725,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
             isEqUpdating.store(false, std::memory_order_release);
 
             lastTapeSpeed = tapeSpeedNorm; lastEqStd = eqStd; lastTapeModel = tapeModel;
-            lastAirGain = airGain; lastDecay = decay; lastAge = currentAgeForScrape; lastMixAmount = effMix;
+            lastAirGain = effectiveAirGain; lastDecay = decay; lastAge = currentAgeForScrape; lastMixAmount = effMix;
         }
 
         if (std::abs(bassDb - lastBass) > 0.01f || std::abs(trebleDb - lastTreble) > 0.01f
@@ -845,8 +855,8 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float effCrosstalk = crosstalkSmoothed.getNextValue() * effMix;
     
     // Модуляция детонации считывается чисто (effMix применяется внутри модулей)
-    const float effWow     = wowAmountSmoothed.getNextValue();
-    const float effFlutter = flutterAmountSmoothed.getNextValue() * 0.5f;
+    const float effWow     = wowAmountSmoothed.getNextValue() * thermal.wowFlutterMult;
+    const float effFlutter = flutterAmountSmoothed.getNextValue() * 0.5f * thermal.wowFlutterMult;
 
     const float currentDecay = decaySmoothed.getCurrentValue();
     float noiseCutoff = 20000.0f - (ageNorm * 4000.0f) - (currentDecay * 400.0f);
@@ -879,14 +889,9 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
         crosstalk.process(blendedL, blendedR, effCrosstalk, currentAgeForScrape);
 
-        blendedL = dropL.process(blendedL, (effOxide + macroDropouts) * thermal.dropoutMult, currentAgeForScrape);
-        displayDropoutLeft.store(dropL.getCurrentGain(), std::memory_order_relaxed);
-        if (wetR != nullptr)
-        {
-            blendedR = dropR.process(blendedR, (effOxide + macroDropouts) * thermal.dropoutMult, currentAgeForScrape);
-            displayDropoutRight.store(dropR.getCurrentGain(), std::memory_order_relaxed);
-        }
-        else displayDropoutRight.store(dropL.getCurrentGain(), std::memory_order_relaxed);
+        dropouts.process(blendedL, blendedR, (effOxide + macroDropouts) * thermal.dropoutMult, currentAgeForScrape);
+        displayDropoutLeft.store(dropouts.getCurrentGainL(), std::memory_order_relaxed);
+        displayDropoutRight.store(dropouts.getCurrentGainR(), std::memory_order_relaxed);
 
         const auto modeEnum = (noiseMode == 0 ? TroakarDSP::NoiseMode::off : (noiseMode == 1 ? TroakarDSP::NoiseMode::staticNoise : TroakarDSP::NoiseMode::dynamicNoise));
 

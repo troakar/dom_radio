@@ -147,7 +147,7 @@ private:
 
     TroakarDSP::TransformerClipper clipL, clipR;
     TroakarDSP::TapeMechanics mechL, mechR;
-    TroakarDSP::OxideDropouts dropL, dropR;
+    TroakarDSP::OxideDropouts dropouts;
     TroakarDSP::WowFlutterGenerator wowGenL, wowGenR;
     TroakarDSP::ToleranceModel toleranceModel;
     TroakarDSP::MainsHum humGen;
