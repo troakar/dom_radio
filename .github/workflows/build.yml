@@ -1,0 +1,80 @@
+name: Build Plugins
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Позволяет запускать сборку вручную одной кнопкой на GitHub
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Сборка сразу на двух платформах: macOS и Windows
+        os: [macos-latest, windows-latest]
+
+    steps:
+      # 1. Клонируем ваш репозиторий. Параметр submodules: recursive 
+      # гарантирует, что JUCE и foleys_gui_magic скачаются, даже если это сабмодули.
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # 2. Настраиваем окружение MSBuild для компиляции под Windows
+      - name: Set up MSBuild (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: microsoft/setup-msbuild@v2
+
+      # 3. Конфигурируем CMake. 
+      # Для macOS принудительно выставляем сборку Universal Binary (arm64 + x86_64)
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            ${{ matrix.os == 'macos-latest' && '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"' || '' }}
+
+      # 4. Запускаем компиляцию в многопоточном режиме (Release)
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      # 5. Собираем готовые плагины для macOS в архив (собираем VST3, AU/component и Standalone)
+      - name: Package macOS Artifacts
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p dist/mac
+          find build -type d -name "*.vst3" -path "*/Release/*" -exec cp -R {} dist/mac/ \;
+          find build -type d -name "*.component" -path "*/Release/*" -exec cp -R {} dist/mac/ \;
+          find build -type d -name "*.app" -path "*/Release/*" -exec cp -R {} dist/mac/ \;
+          cd dist
+          zip -r ../dom-radio-mac.zip mac
+
+      # 6. Отправляем ZIP-архив macOS на сервер GitHub в качестве артефакта сборки
+      - name: Upload macOS Artifacts
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dom-radio-mac
+          path: dom-radio-mac.zip
+
+      # 7. Собираем готовые плагины для Windows (VST3 и Standalone .exe)
+      - name: Package Windows Artifacts
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/win
+          Get-ChildItem -Path build -Recurse -Filter "*.vst3" | Where-Object { $_.FullName -like "*\Release\*" -and $_.FullName -notlike "*\CMakeFiles\*" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Recurse -Force }
+          Get-ChildItem -Path build -Recurse -Filter "*.exe" | Where-Object { $_.FullName -like "*\Release\*" -and $_.FullName -notlike "*\CMakeFiles\*" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Force }
+          Compress-Archive -Path dist/win -DestinationPath dom-radio-win.zip
+
+      # 8. Отправляем ZIP-архив Windows на сервер GitHub
+      - name: Upload Windows Artifacts
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dom-radio-win
+          path: dom-radio-win.zip
