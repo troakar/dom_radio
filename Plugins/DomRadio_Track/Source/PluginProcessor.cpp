@@ -35,6 +35,7 @@ DomRadioTrackAudioProcessor::DomRadioTrackAudioProcessor()
     wowParam = apvts.getRawParameterValue("WOW_AMOUNT");
     flutterParam = apvts.getRawParameterValue("FLUTTER_AMOUNT");
     noiseParam = apvts.getRawParameterValue("TAPE_NOISE");
+    ageParam = apvts.getRawParameterValue("AGE");
 
     startTimerHz(10);
 }
@@ -196,6 +197,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout DomRadioTrackAudioProcessor:
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "TAPE_NOISE", "Noise", juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f,
         FloatAttr().withStringFromValueFunction(modulationPercentFormat).withValueFromStringFunction(modulationPercentParse)));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "AGE", "Tape Age", juce::NormalisableRange<float>(0.0f, 50.0f, 1.0f), 0.0f,
+        FloatAttr().withStringFromValueFunction([](float value, int) {
+            const int years = static_cast<int>(std::round(value));
+            return years == 0 ? juce::String("New Reel") : juce::String(years) + " yrs";
+        })));
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         "OVERSAMPLING", "Oversampling", juce::StringArray { "1x", "2x", "4x" }, 1));
@@ -293,13 +300,20 @@ void DomRadioTrackAudioProcessor::prepareToPlay (double sampleRate, int samplesP
     velvetGrainR.prepare(sampleRate, BinaryData::noise_mid_velvet_and_soft_mp3, BinaryData::noise_mid_velvet_and_soft_mp3Size);
     vinylGrainL.prepare(sampleRate, BinaryData::noise_high_vinyl_like_mp3, BinaryData::noise_high_vinyl_like_mp3Size);
     vinylGrainR.prepare(sampleRate, BinaryData::noise_high_vinyl_like_mp3, BinaryData::noise_high_vinyl_like_mp3Size);
+    contactL.prepare(sampleRate);
+    contactR.prepare(sampleRate);
+
+    DBG("velvet loaded: " << velvetGrainL.getNumLoadedSamples());
+    jassert(velvetGrainL.getNumLoadedSamples() > 0);
 
     wowSmoothed.reset(sampleRate, 0.05);
     flutterSmoothed.reset(sampleRate, 0.05);
     noiseSmoothed.reset(sampleRate, 0.05);
+    ageSmoothed.reset(sampleRate, 0.05);
     wowSmoothed.setCurrentAndTargetValue(wowParam ? wowParam->load() : 0.0f);
     flutterSmoothed.setCurrentAndTargetValue(flutterParam ? flutterParam->load() : 0.0f);
     noiseSmoothed.setCurrentAndTargetValue(noiseParam ? noiseParam->load() : 0.0f);
+    ageSmoothed.setCurrentAndTargetValue(ageParam ? ageParam->load() : 0.0f);
     
     resetProcessingState();
 }
@@ -399,7 +413,6 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     preTrebleFreqSmoothed.skip(numSamples);
     wowSmoothed.skip(numSamples);
     flutterSmoothed.skip(numSamples);
-    noiseSmoothed.skip(numSamples);
 
     if (inputGainSmoothed.isSmoothing())
     {
@@ -622,30 +635,36 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
             finalR = mechR.process(finalR, tapeSpeedNorm, mixAmount, 0.0f, 0.0f, false, modR);
 
         const float currentNoise = noiseSmoothed.getNextValue() * mixAmount;
+        const float currentAge   = ageSmoothed.getNextValue() * mixAmount;
+        const float ageNorm      = juce::jlimit(0.0f, 1.0f, currentAge / 50.0f);
 
         if (currentNoise > 0.0001f) {
             const auto modeEnum = TroakarDSP::NoiseMode::staticNoise;
-            const float ageNorm = 0.0f;
 
             float midGrainL  = velvetGrainL.process(finalL, modeEnum, tapeSpeedNorm, ageNorm);
             float highGrainL = vinylGrainL.process(finalL, modeEnum, tapeSpeedNorm, ageNorm);
-            float combinedGrainL = midGrainL * 0.7f + highGrainL * 0.3f;
+            float combinedGrainL = midGrainL * (1.0f - ageNorm * 0.2f) + highGrainL * (0.30f + ageNorm * 0.70f);
 
-            float noiseCurve = currentNoise * currentNoise;
-            float additiveNoiseL = combinedGrainL * noiseCurve * 0.6f;
+            float noiseCurve = currentNoise * (0.45f + 0.55f * currentNoise);
+            float additiveNoiseL = combinedGrainL * noiseCurve * (0.45f + ageNorm * 0.15f);
+            float contactNoiseL = contactL.process(finalL, currentAge, 0.0f, modeEnum) * currentNoise;
+            float rawNoiseSumL = (additiveNoiseL + contactNoiseL) * 0.6f;
 
-            float noiseCutoff = juce::jlimit(4000.0f, 20000.0f, 18000.0f - currentNoise * 4000.0f);
+            float noiseCutoff = juce::jlimit(4000.0f, 20000.0f, 18000.0f - ageNorm * 4000.0f - currentNoise * 2000.0f);
             noiseDecayFilterL.setLowPass(noiseCutoff, 0.707f);
-            finalL += noiseDecayFilterL.processSample(additiveNoiseL);
+            finalL += noiseDecayFilterL.processSample(rawNoiseSumL);
 
             if (wetR != nullptr) {
                 float midGrainR  = velvetGrainR.process(finalR, modeEnum, tapeSpeedNorm, ageNorm);
                 float highGrainR = vinylGrainR.process(finalR, modeEnum, tapeSpeedNorm, ageNorm);
-                float combinedGrainR = midGrainR * 0.7f + highGrainR * 0.3f;
+                float combinedGrainR = midGrainR * (1.0f - ageNorm * 0.2f) + highGrainR * (0.30f + ageNorm * 0.70f);
 
-                float additiveNoiseR = combinedGrainR * noiseCurve * 0.6f;
+                float additiveNoiseR = combinedGrainR * noiseCurve * (0.45f + ageNorm * 0.15f);
+                float contactNoiseR = contactR.process(finalR, currentAge, 0.0f, modeEnum) * currentNoise;
+                float rawNoiseSumR = (additiveNoiseR + contactNoiseR) * 0.6f;
+
                 noiseDecayFilterR.setLowPass(noiseCutoff, 0.707f);
-                finalR += noiseDecayFilterR.processSample(additiveNoiseR);
+                finalR += noiseDecayFilterR.processSample(rawNoiseSumR);
             }
         }
 

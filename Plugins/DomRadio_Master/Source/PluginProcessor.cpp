@@ -883,9 +883,9 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
         float midGrainL  = velvetGrainL.process(blendedL, modeEnum, tapeSpeedNorm, ageNorm);
         float highGrainL = vinylGrainL.process(blendedL, modeEnum, tapeSpeedNorm, ageNorm);
-        float combinedGrainL = midGrainL * (1.0f - ageNorm * 0.3f) + highGrainL * (ageNorm * 1.5f);
+        float combinedGrainL = midGrainL * (1.0f - ageNorm * 0.2f) + highGrainL * (0.30f + ageNorm * 0.70f);
 
-        float intermodDepthL = 0.02f + ageNorm * 0.35f; 
+        float intermodDepthL = (0.08f + ageNorm * 0.20f) * (0.3f + effTapeNoise * 0.7f);
         float intermodL = 1.0f + combinedGrainL * intermodDepthL;
         blendedL *= intermodL;
 
@@ -895,8 +895,8 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
         
         noiseDecayFilterL.setLowPass(noiseCutoff, 0.707f);
 
-        float noiseCurve = effTapeNoise * effTapeNoise;
-        float additiveNoiseL = combinedGrainL * noiseCurve * (0.2f + ageNorm * 0.4f);
+        float noiseCurve = effTapeNoise * (0.45f + 0.55f * effTapeNoise);
+        float additiveNoiseL = combinedGrainL * noiseCurve * (0.45f + ageNorm * 0.15f);
         float contactNoiseL = contactL.process(blendedL, currentAgeForScrape, effHum, modeEnum) * effTapeNoise;
         float rawNoiseSumL = (additiveNoiseL + humSample + contactNoiseL) * 0.6f;
         blendedL += noiseDecayFilterL.processSample(rawNoiseSumL);
@@ -907,13 +907,13 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
             
             float midGrainR  = velvetGrainR.process(blendedR, modeEnum, tapeSpeedNorm, ageNorm);
             float highGrainR = vinylGrainR.process(blendedR, modeEnum, tapeSpeedNorm, ageNorm);
-            float combinedGrainR = midGrainR * (1.0f - ageNorm * 0.3f) + highGrainR * (ageNorm * 1.5f);
+            float combinedGrainR = midGrainR * (1.0f - ageNorm * 0.2f) + highGrainR * (0.30f + ageNorm * 0.70f);
 
-            float intermodDepthR = 0.02f + ageNorm * 0.35f;
+            float intermodDepthR = (0.08f + ageNorm * 0.20f) * (0.3f + effTapeNoise * 0.7f);
             float intermodR = 1.0f + combinedGrainR * intermodDepthR;
             blendedR *= intermodR;
 
-            float additiveNoiseR = combinedGrainR * noiseCurve * (0.2f + ageNorm * 0.4f);
+            float additiveNoiseR = combinedGrainR * noiseCurve * (0.45f + ageNorm * 0.15f);
             float contactNoiseR = contactR.process(blendedR, currentAgeForScrape, effHum, modeEnum) * effTapeNoise;
             float rawNoiseSumR = (additiveNoiseR + humSample + contactNoiseR) * 0.6f;
             blendedR += noiseDecayFilterR.processSample(rawNoiseSumR);

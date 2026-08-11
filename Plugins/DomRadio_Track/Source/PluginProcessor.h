@@ -134,6 +134,7 @@ private:
     TroakarDSP::WowFlutterGenerator wowGenL, wowGenR;
     TroakarDSP::ArchivalGrainPlayer velvetGrainL, velvetGrainR;
     TroakarDSP::ArchivalGrainPlayer vinylGrainL, vinylGrainR;
+    TroakarDSP::ContactNoise contactL, contactR;
 
     float lastTapeSpeed = -999.0f;
     int lastEqStd = -1, lastTapeModel = -1;
@@ -150,7 +151,7 @@ private:
     juce::SmoothedValue<float> bassFrequencySmoothed, trebleFrequencySmoothed;
     juce::SmoothedValue<float> outputGainSmoothed, biasSagSmoothed, ironCoreSmoothed;
     juce::SmoothedValue<float> preBassSmoothed, preTrebleSmoothed, preBassFreqSmoothed, preTrebleFreqSmoothed;
-    juce::SmoothedValue<float> wowSmoothed, flutterSmoothed, noiseSmoothed;
+    juce::SmoothedValue<float> wowSmoothed, flutterSmoothed, noiseSmoothed, ageSmoothed;
     
     double currentSampleRate = 44100.0;
     int preparedBlockSize = 0;
@@ -185,6 +186,7 @@ private:
     std::atomic<float>* wowParam = nullptr;
     std::atomic<float>* flutterParam = nullptr;
     std::atomic<float>* noiseParam = nullptr;
+    std::atomic<float>* ageParam = nullptr;
 
 public:
     bool eqMonitorExpanded = false;

@@ -48,6 +48,7 @@ DomRadioTrackAudioProcessorEditor::DomRadioTrackAudioProcessorEditor(DomRadioTra
     addAndMakeVisible(wowKnob);
     addAndMakeVisible(flutterKnob);
     addAndMakeVisible(tapeNoiseKnob);
+    addAndMakeVisible(ageKnob);
 
     addAndMakeVisible(mixKnob);
     addAndMakeVisible(outLvlKnob);
@@ -169,6 +170,7 @@ void DomRadioTrackAudioProcessorEditor::resized()
     wowKnob.setBounds(p2Rect.getX() + 15,   p2Rect.getY() + 238, 70, 50);
     flutterKnob.setBounds(p2Rect.getX() + 95,  p2Rect.getY() + 238, 70, 50);
     tapeNoiseKnob.setBounds(p2Rect.getX() + 175, p2Rect.getY() + 238, 70, 50);
+    ageKnob.setBounds(p2Rect.getX() + 205,       p2Rect.getY() + 238, 60, 50);
 
     // Блок 3 (Идеальная компоновка 4 ручек шириной 65px внутри панели шириной 286px)
     mixKnob.setBounds(p3Rect.getX() + 5,  p3Rect.getY() + 32, 65, 60);

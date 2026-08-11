@@ -53,6 +53,7 @@ target_sources(DomRadioTrack PRIVATE
 
 target_compile_definitions(DomRadioTrack PRIVATE
     JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_USE_MP3AUDIOFORMAT=1
 )
 
 target_link_libraries(DomRadioTrack PRIVATE

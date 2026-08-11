@@ -1463,10 +1463,6 @@ public:
         
         totalSamples = 0;
         
-        #if JUCE_USE_MP3AUDIOFORMAT
-        formatManager.registerFormat(new juce::MP3AudioFormat(), true);
-        #endif
-        
         if (embeddedData != nullptr && dataSize > 0) {
             auto stream = std::make_unique<juce::MemoryInputStream>(embeddedData, dataSize, false);
             std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(std::move(stream)));
@@ -1505,6 +1501,8 @@ public:
         else playHead = 0.0;
         env = 0.0f;
     }
+
+    int getNumLoadedSamples() const noexcept { return sampleBuffer.getNumSamples(); }
 
     forcedinline float process(float inputSample, NoiseMode mode, float speedNorm, float ageNorm) {
         if (totalSamples == 0 || mode == NoiseMode::off) 
@@ -1568,7 +1566,7 @@ public:
         const float releaseCoeff = 1.0f - std::exp(-1.0f / (0.040f * static_cast<float>(sr)));
         env += (absIn > env ? attackCoeff : releaseCoeff) * (absIn - env);
 
-        const float crackleProb = 0.00004f + ageNorm * 0.00035f + humFactor * 0.00008f;
+        const float crackleProb = 0.00012f + ageNorm * 0.00020f + humFactor * 0.00008f;
         const float crackle = (rng.nextFloat() < crackleProb)
             ? (rng.nextFloat() * 2.0f - 1.0f) * (0.25f + ageNorm * 0.75f)
             : 0.0f;
@@ -1577,9 +1575,9 @@ public:
         crackleEnv += (std::abs(crackle) > crackleEnv ? 0.70f : 0.08f)
                     * (std::abs(crackle) - crackleEnv);
 
-        const float rustle = (rng.nextFloat() * 2.0f - 1.0f) * 0.015f * (0.3f + ageNorm * 1.2f);
+        const float rustle = (rng.nextFloat() * 2.0f - 1.0f) * 0.015f * (0.75f + ageNorm * 0.45f);
         const float modulated = rustle + crackle;
-        const float cableGain = 0.06f + ageNorm * 0.18f + humFactor * 0.04f;
+        const float cableGain = 0.14f + ageNorm * 0.10f + humFactor * 0.04f;
 
         float noiseOut = modulated * cableGain * (0.5f + env * 1.5f);
 
