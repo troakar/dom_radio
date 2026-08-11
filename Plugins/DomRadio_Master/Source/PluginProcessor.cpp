@@ -604,7 +604,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     float transient = 1.0f - ((1.0f - transientSmoothed.getCurrentValue()) * effMix);
     
     const float tapeSpeedIps = juce::jlimit(TroakarDSP::TapesDSP::minTapeSpeedIps, TroakarDSP::TapesDSP::maxTapeSpeedIps, tapeSpeedSmoothed.getCurrentValue());
-    const float tapeSpeedNorm = TroakarDSP::TapesDSP::speedIpsToNorm(tapeSpeedIps);
+    const float tapeSpeedNorm = TroakarDSP::TapesDSP::speedIpsToNorm(tapeSpeedIps) * 0.75f;
     const auto tapeFormat = TroakarDSP::TapesDSP::getFormatForSpeedIps(tapeSpeedIps);
     
     const float headroomScale = juce::Decibels::decibelsToGain(12.0f - tapeFormat.headroomDb);
@@ -657,9 +657,6 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float preTrebleFreq = preTrebleFreqSmoothed.getCurrentValue();
 
     const float currentAgeForScrape = ageSmoothed.getCurrentValue(); // Убрали * effMix
-    const float effTapeNoise = tapeNoiseSmoothed.getCurrentValue() * effMix;
-    const float effHum = humSmoothed.getCurrentValue() * effMix;
-    const float effOxide = oxideSmoothed.getCurrentValue() * effMix;
     const float effAzimuth = azimuthSmoothed.getCurrentValue() * effMix;
     int noiseMode = static_cast<int>(noiseModeParam->load());
     const float detAmount = detailAmountParam->load() / 100.0f * effMix;
@@ -849,7 +846,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     
     // Модуляция детонации считывается чисто (effMix применяется внутри модулей)
     const float effWow     = wowAmountSmoothed.getNextValue();
-    const float effFlutter = flutterAmountSmoothed.getNextValue();
+    const float effFlutter = flutterAmountSmoothed.getNextValue() * 0.5f;
 
     for (int i = 0; i < numSamples; ++i)
     {

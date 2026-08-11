@@ -416,7 +416,7 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     else osWorkBuffer.copyFrom(1, 0, buffer.getReadPointer(1), numSamples);
 
     const float tapeSpeedIps = juce::jlimit(TroakarDSP::TapesDSP::minTapeSpeedIps, TroakarDSP::TapesDSP::maxTapeSpeedIps, tapeSpeedSmoothed.getCurrentValue());
-    const float tapeSpeedNorm = TroakarDSP::TapesDSP::speedIpsToNorm(tapeSpeedIps);
+    const float tapeSpeedNorm = TroakarDSP::TapesDSP::speedIpsToNorm(tapeSpeedIps) * 0.75f;
     int eqStd = static_cast<int>(eqStdParam->load());
     int tapeModel = static_cast<int>(tapeModelParam->load());
     const auto tapeProfile = TroakarDSP::TapesDSP::getBalancedProfile(tapeModel);
@@ -591,7 +591,7 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     auto* wetR = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
 
     const float effWow = wowSmoothed.getNextValue();
-    const float effFlutter = flutterSmoothed.getNextValue();
+    const float effFlutter = flutterSmoothed.getNextValue() * 0.5f;
     const float effNoise = noiseSmoothed.getNextValue() * mixAmount; 
 
     for (int i = 0; i < numSamples; ++i)

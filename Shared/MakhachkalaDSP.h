@@ -514,19 +514,32 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
     TapeCurve getTapeCurve(float speedNorm, int eqMode, const TapesDSP::TapeProfile& profile) const noexcept
     {
         TapeCurve curve;
-        curve.frequency = profile.preEmphasisFreq;
-        curve.gainDb = profile.preEmphasisGainDb;
-        if (eqMode == 1)
+        
+        const float speedIps = TapesDSP::speedNormToIps(speedNorm);
+        
+        if (eqMode == 0) // CCIR
         {
-            curve.frequency *= 0.78f + speedNorm * 0.07f;
-            curve.gainDb -= 2.0f - speedNorm * 1.0f;
+            const float baseFreq = profile.preEmphasisFreq;
+            curve.frequency = baseFreq * (1.0f + speedNorm * 0.18f);
+            curve.gainDb = profile.preEmphasisGainDb * (1.0f + speedNorm * 0.25f);
+            
+            if (speedIps < 7.5f) {
+                const float slowPenalty = (7.5f - speedIps) / 5.625f;
+                curve.gainDb *= (1.0f - slowPenalty * 0.35f);
+            }
         }
-        if (profile.preEmphasisFreq < 100.0f)
+        else // NAB (eqMode==1)
         {
-            if (eqMode == 0)
-                return TapeCurve { 16000.0f + speedNorm * 2000.0f, 14.0f - speedNorm * 6.0f };
-            return TapeCurve { 1768.0f + speedNorm * 2779.0f, 6.0f + speedNorm * 2.0f };
+            const float baseFreq = profile.preEmphasisFreq;
+            curve.frequency = baseFreq * 0.65f * (1.0f + speedNorm * 0.12f);
+            curve.gainDb = profile.preEmphasisGainDb * 0.55f * (1.0f + speedNorm * 0.15f);
+            
+            if (speedIps < 7.5f) {
+                const float slowBonus = (7.5f - speedIps) / 5.625f;
+                curve.gainDb *= (1.0f + slowBonus * 0.15f);
+            }
         }
+        
         return curve;
     }
 
@@ -570,21 +583,25 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
 
             const float bumpSpeedScale = std::pow(speedScale, 0.70f);
 
-            const float f0 = profile.headBumpFreq * bumpSpeedScale;
+            const float eqStdFreqScale = (eqMode == 0) ? 1.15f : 0.85f;
+            const float f0 = profile.headBumpFreq * bumpSpeedScale * eqStdFreqScale;
 
             const float baseGain = profile.headBumpGainDb
                 * (1.0f + (1.0f - speedScale) * 0.55f);
+
+            const float eqStdBumpScale = (eqMode == 0) ? 1.35f : 0.75f;
 
             const float ageNorm = juce::jlimit(0.0f, 1.0f, age / 50.0f);
             const float thermalShift = 1.0f - ageNorm * 0.08f;
             const float f0_adjusted = f0 * thermalShift;
             const float ageAttenuation = 1.0f - ageNorm * 0.15f;
-            const float baseGain_adjusted = baseGain * ageAttenuation * mixAmount; // MIX
+            const float baseGain_adjusted = baseGain * ageAttenuation * eqStdBumpScale * mixAmount;
 
             const float hbfVar = tolerances ? tolerances->headBumpFrequency : 1.0f;
             const float hbqVar = tolerances ? tolerances->headBumpQ         : 1.0f;
             const float f0_tmt = f0_adjusted * hbfVar;
-            const float Q_tmt  = (1.2f * (1.0f - ageNorm * 0.2f)) * hbqVar;
+            const float baseQ = (eqMode == 0) ? 1.5f : 0.9f;
+            const float Q_tmt  = (baseQ * (1.0f - ageNorm * 0.2f)) * hbqVar;
 
             headBumpPrimary.coefficients = juce::dsp::IIR::Coefficients<double>::makePeakFilter(
                 sr, (double)f0_tmt, (double)Q_tmt, juce::Decibels::decibelsToGain((double)baseGain_adjusted));
@@ -627,6 +644,9 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
 
             const float speedLossFreq = profile.gapLossBaseFreq * std::pow(speedScale, 0.82f);
 
+            const float eqStdGapScale = (eqMode == 0) ? 1.10f : 0.90f;
+            const float speedLossFreq_adjusted = speedLossFreq * eqStdGapScale;
+
             // 2. Износ головки: зазор увеличивается
             const float wearFactor = 1.0f - ageNorm * 0.22f; 
 
@@ -636,7 +656,7 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
             const float decayCurve = std::pow(decay / 10.0f, 1.15f) * 10.0f; 
             const float magneticDecay = decayCurve * 800.0f; 
 
-            float targetGapFreq = speedLossFreq * wearFactor * gapVar - magneticDecay;
+            float targetGapFreq = speedLossFreq_adjusted * wearFactor * gapVar - magneticDecay;
 
             // ИСПРАВЛЕНО: Сняли ограничитель в 6500 Гц, опустив его до 1500 Гц. 
             // Теперь ручка Decay может полноценно "заглушить" высокие частоты на низких скоростях пленки.

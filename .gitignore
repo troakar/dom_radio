@@ -17,8 +17,6 @@ out/
 *.xcworkspace/
 .DS_Store
 
-# JUCE Generated
-JUCE/
 
 # Binary artifacts
 *.vst3
