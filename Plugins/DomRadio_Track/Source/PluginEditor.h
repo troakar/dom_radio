@@ -51,6 +51,7 @@ private:
     LabeledKnob wowKnob { audioProcessor.apvts, "WOW_AMOUNT", "WOW" };
     LabeledKnob flutterKnob { audioProcessor.apvts, "FLUTTER_AMOUNT", "FLUTTER" };
     LabeledKnob tapeNoiseKnob { audioProcessor.apvts, "TAPE_NOISE", "NOISE" };
+    LabeledKnob ageKnob { audioProcessor.apvts, "AGE", "AGE" };
 
     LabeledKnob mixKnob { audioProcessor.apvts, "MIX", "MIX" };
     LabeledKnob outLvlKnob { audioProcessor.apvts, "OUT_LVL", "OUTPUT" };

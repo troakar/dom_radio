@@ -65,16 +65,24 @@ juce::Path EQGraphLED::buildResponsePath(const DomRadioMasterAudioProcessor::Tap
     juce::Path path;
     const int w = getWidth();
     
+    // В Master версии добавляются шумы износа и трения (Scrape Flutter)
     const float age = *processor.apvts.getRawParameterValue("AGE") / 50.0f;
     const float scrape = *processor.apvts.getRawParameterValue("SCRAPE_FLUTTER");
+    
+    const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    const float mixNorm = *processor.apvts.getRawParameterValue("MIX") / 100.0f;
+    const float wowDepth = *processor.apvts.getRawParameterValue("WOW_AMOUNT") * mixNorm;
+    const float flutterDepth = *processor.apvts.getRawParameterValue("FLUTTER_AMOUNT") * mixNorm;
     
     for (int i = 0; i < w; i += 2)
     {
         const double freq = 20.0 * std::pow(1000.0, (double)i / (double)(w - 1));
         double mag = processor.getCompositeMagnitude(freq);
         
+        // Симуляция выпадения сигнала (Dropouts)
         mag *= state.dropoutLeft;
         
+        // Симуляция ВЧ-песка (Scrape Flutter & Age)
         float hfRipple = 0.0f;
         if (freq > 2000.0) {
             float jitter = juce::Random::getSystemRandom().nextFloat() - 0.5f;
@@ -85,10 +93,13 @@ juce::Path EQGraphLED::buildResponsePath(const DomRadioMasterAudioProcessor::Tap
         
         float dB = juce::Decibels::gainToDecibels((float)juce::jmax(1.0e-6, mag));
         
-        float wobble = std::sin((float)i * 0.03f + state.wow * 15.0f) * (state.wow * 8.0f);
-        wobble += std::cos((float)i * 0.15f + state.flutter * 60.0f) * (state.flutter * 4.0f);
+        // --- ГЕНЕРАЦИЯ БЕГУЩЕЙ РЯБИ ---
+        const double nx = (double)i / (double)w;
+        const double wowRipple = wowDepth * 12.0 * std::sin(nx * 8.0 - t * 5.0);
+        const double flutterRipple = flutterDepth * 4.0 * std::sin(nx * 35.0 - t * 25.0);
         
-        const float y = juce::jlimit(3.0f, (float)getHeight() - 3.0f, gainToY(dB) + wobble);
+        const float y = juce::jlimit(3.0f, (float)getHeight() - 3.0f, 
+                                     gainToY(dB) + static_cast<float>(wowRipple + flutterRipple));
         
         if (i == 0) path.startNewSubPath(0.0f, y);
         else        path.lineTo((float)i, y);

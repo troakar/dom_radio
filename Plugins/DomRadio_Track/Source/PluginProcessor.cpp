@@ -393,6 +393,7 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     wowSmoothed.setTargetValue(wowParam->load());
     flutterSmoothed.setTargetValue(flutterParam->load());
     noiseSmoothed.setTargetValue(noiseParam->load());
+    ageSmoothed.setTargetValue(ageParam->load()); // <--- ВОТ ОНА! Спасительная строка
 
     driveSmoothed.skip(numSamples);
     tapeDriveSmoothed.skip(numSamples);

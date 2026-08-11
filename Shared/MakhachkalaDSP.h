@@ -1063,25 +1063,24 @@ public:
         float azi = isLeftChannel ? 0.0f
                       : std::sin(aziPhase * juce::MathConstants<float>::twoPi) * smoothAzi;
 
+        // --- ИСПРАВЛЕНИЕ: Общая модуляция для предотвращения фазовой гребенки ---
+        const float commonModDelay = baseDelaySec + (modulation.wow * smoothWowDepth * 0.10f) + (modulation.flutter * smoothFlutterDepth);
+
         delayLineLows.pushSample(0, lowPassSample);
-        const float lowWowDelay = baseDelaySec + modulation.wow * smoothWowDepth * 0.10f;
-        const float lowDelaySamples = juce::jmax(0.0f, lowWowDelay) * static_cast<float>(sr);
+        const float lowDelaySamples = juce::jmax(0.0f, commonModDelay) * static_cast<float>(sr);
         float processedLows = delayLineLows.popSample(0, lowDelaySamples);
 
         delayLineHighs.pushSample(0, highPassSample);
-        const float flutterDelay = modulation.flutter * smoothFlutterDepth;
-        float highDelaySamples = juce::jmax(0.0f, lowWowDelay + flutterDelay + azi)
-                         * static_cast<float>(sr);
+        // Азимут добавляется только к верхам (для моносовместимого стерео-расширения)
+        const float highDelaySamples = juce::jmax(0.0f, commonModDelay + azi) * static_cast<float>(sr);
         float processedHighs = delayLineHighs.popSample(0, highDelaySamples);
 
-        // Azimuth теперь работает исключительно за счет микрозадержки в delayLineHighs, 
-        // что безопасно и 100% моноосовместимо.
         return processedLows + processedHighs;
     }
 
 private:
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delayLineLows;
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLineHighs;
+    // ОБЕ линии должны быть Lagrange3rd, иначе быстрая модуляция флаттера дает цифровой хрип!
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLineLows, delayLineHighs;
     juce::dsp::IIR::Filter<double> crossover;
     double sr = 44100.0;
     float aziPhase = 0.0f;
@@ -1221,37 +1220,29 @@ public:
         driftY = 0.0f;
         wowMomentum = 0.0f;
 
-        // Инициализация фаз флаттера
-        phaseF1 = 0.0f; phaseF2 = 0.0f; phaseF3 = 0.0f;
         phaseW = 0.0f;
+        phaseF1 = 0.0f; phaseF2 = 0.0f; phaseF3 = 0.0f;
 
-        // LPF для органичного дрейфа мотора (как в ChowTape)
         driftLpf.prepare(sampleRate);
         driftLpf.setLowPass(10.0, 0.707); // 10 Hz LPF
     }
 
     void setSeed(uint32_t seed) { rng.setSeed(seed); }
 
-    // TMT: подставить допуски (nullptr = Calibrated)
     void setTolerances(const ToleranceModel::ComponentTolerances* t) noexcept { tolerances = t; }
 
     forcedinline WowFlutterModulation generate(float speedNorm, float wowAmount, float flutterAmount) {
         const float wowScale = juce::jlimit(0.0f, 1.0f, wowAmount);
         const float flutterScale = juce::jlimit(0.0f, 1.0f, flutterAmount);
 
-        // --- 1. WOW: Ornstein-Uhlenbeck Process с фильтрованным шумом ---
+        // --- 1. WOW: Ornstein-Uhlenbeck Process + LFO ---
         float rawGaussian = (rng.nextFloat() + rng.nextFloat() + rng.nextFloat() + rng.nextFloat() - 2.0f) * 1.732f;
-
-        // Фильтруем шум, чтобы дрейф был плавным (вязкость мотора)
         float filteredGaussian = driftLpf.processSample(rawGaussian);
 
-        // OU Math
         float damping = (wowScale * 20.0f) + 1.0f;
         driftY += sqrtdelta * filteredGaussian * (wowScale * 0.8f);
-        driftY += damping * (wowScale - driftY) * T; // Mean = wowScale (как в Chow)
+        driftY += damping * (wowScale - driftY) * T; 
 
-        // Базовый Wow LFO
-        // TMT: разброс частоты wow (+/-2%)
         const float wowFreqVar = tolerances ? tolerances->wowFrequencyDrift : 1.0f;
         const float speedIps = TapesDSP::speedNormToIps(speedNorm);
         const float speedScale = juce::jlimit(0.125f, 1.0f, speedIps / 15.0f);
@@ -1262,61 +1253,49 @@ public:
         if (phaseW >= 1.0f) phaseW -= 1.0f;
         const float wowPeriodic = std::sin(phaseW * juce::MathConstants<float>::twoPi) * 0.4f * wowScale;
 
-        // Суммарный Wow = Периодический + Гауссовский OU Дрейф
-        const float wowTarget = wowPeriodic + juce::jlimit(-2.0f, 2.0f, driftY - wowScale);
-        
+        // [ИЗМЕНЕНИЕ]: Умножаем сумму периодического LFO и хаотичного дрейфа на 1.60f (+60%)
+        // Это сделает "плавание" питча значительно более выраженным на максимальных значениях ручки
+        const float wowTarget = (wowPeriodic + juce::jlimit(-2.0f, 2.0f, driftY - wowScale)) * 1.60f;
         const float inertia = 0.82f + speedNorm * 0.10f;
         wowMomentum = inertia * wowMomentum + (1.0f - inertia) * wowTarget;
 
-        const float finalWow = wowMomentum;
-
-        // --- 2. FLUTTER: Точные формулы ChowTape ---
-        // TMT: разброс частоты flutter (+/-5%)
+        // --- 2. FLUTTER: CHOW TAPE SIMPLIFIED ---
         const float flutterFreqVar = tolerances ? tolerances->flutterFrequencyDrift : 1.0f;
-        const float flutterBaseFreq = (7.0f + speedRoot * 20.0f) * flutterFreqVar;
+        // [ИЗМЕНЕНИЕ 1]: Уменьшаем частоту флаттера на 40% (множитель 0.60f)
+        // Теперь флаттер звучит не как механическое "жужжание", а как быстрое, но читаемое дрожание ленты
+        const float flutterBaseFreq = (7.0f + speedRoot * 20.0f) * flutterFreqVar * 0.60f;
 
-        // Угловые шаги (дельты)
         const float dTheta1 = juce::MathConstants<float>::twoPi * flutterBaseFreq * T;
-        const float dTheta2 = 2.0f * dTheta1;
-        const float dTheta3 = 3.0f * dTheta1;
+        
+        // Надежно кольцуем фазы, чтобы они не улетали в бесконечность
+        phaseF1 = std::fmod(phaseF1 + dTheta1, juce::MathConstants<float>::twoPi);
+        phaseF2 = std::fmod(phaseF2 + 2.0f * dTheta1, juce::MathConstants<float>::twoPi);
+        phaseF3 = std::fmod(phaseF3 + 3.0f * dTheta1, juce::MathConstants<float>::twoPi);
 
-        phaseF1 += dTheta1; if (phaseF1 >= juce::MathConstants<float>::twoPi) phaseF1 -= juce::MathConstants<float>::twoPi;
-        phaseF2 += dTheta2; if (phaseF2 >= juce::MathConstants<float>::twoPi) phaseF2 -= juce::MathConstants<float>::twoPi;
-        phaseF3 += dTheta3; if (phaseF3 >= juce::MathConstants<float>::twoPi) phaseF3 -= juce::MathConstants<float>::twoPi;
-
-        // Фазовые сдвиги и амплитуды из flutter_process.h
         const float off2 = 13.0f * juce::MathConstants<float>::pi / 4.0f;
         const float off3 = -juce::MathConstants<float>::pi / 10.0f;
 
-        const float amp1 = -0.230f;
-        const float amp2 = -0.080f;
-        const float amp3 = -0.099f;
+        // ИСПОЛЬЗУЕМ СТРОГО std::cos! FastMath падает от фаз > pi и взрывает DelayLine!
+        const float complexFlutter = (-0.230f * std::cos(phaseF1)) +
+                                     (-0.080f * std::cos(phaseF2 + off2)) +
+                                     (-0.099f * std::cos(phaseF3 + off3));
 
-        // Сложная интерференция
-        const float complexFlutter = (amp1 * juce::dsp::FastMathApproximations::cos(phaseF1)) +
-                                     (amp2 * juce::dsp::FastMathApproximations::cos(phaseF2 + off2)) +
-                                     (amp3 * juce::dsp::FastMathApproximations::cos(phaseF3 + off3));
+        // [ИЗМЕНЕНИЕ 2]: Уменьшаем силу влияния на 50% (множитель снижен с 3.5f до 1.75f)
+        // Теперь даже на 100% ручка Flutter не будет превращать звук в "кашу"
+        const float finalFlutter = complexFlutter * flutterScale * 1.75f;
 
-        const float finalFlutter = complexFlutter * flutterScale * 2.5f;
-
-        return { finalWow, finalFlutter };
+        return { wowMomentum, finalFlutter };
     }
 
 private:
     double sr = 44100.0;
-
-    // Переменные для OU Process
     float sqrtdelta = 1.0f;
     float T = 1.0f;
     float driftY = 0.0f;
-    float wowMomentum = 0.0f; // Инерция катушки (момент)
-
-    // Фазы LFO
+    float wowMomentum = 0.0f; 
     float phaseW = 0.0f;
     float phaseF1 = 0.0f, phaseF2 = 0.0f, phaseF3 = 0.0f;
-
-    FastBiquad driftLpf; // LPF для шума
-
+    FastBiquad driftLpf; 
     FastRandom rng { 1984 };
     const ToleranceModel::ComponentTolerances* tolerances = nullptr;
 };
@@ -1488,7 +1467,7 @@ public:
         }
         
         dynAttack = 1.0f - std::exp(-1.0f / (0.010f * static_cast<float>(sr)));
-        dynRelease = 1.0f - std::exp(-1.0f / (0.700f * static_cast<float>(sr)));
+        dynRelease = 1.0f - std::exp(-1.0f / (0.350f * static_cast<float>(sr)));
         
         reset();
     }
@@ -1560,7 +1539,7 @@ public:
 
         const float absIn = std::abs(input);
         const float attackCoeff = 1.0f - std::exp(-1.0f / (0.006f * static_cast<float>(sr)));
-        const float releaseCoeff = 1.0f - std::exp(-1.0f / (0.700f * static_cast<float>(sr)));
+        const float releaseCoeff = 1.0f - std::exp(-1.0f / (0.350f * static_cast<float>(sr)));
         env += (absIn > env ? attackCoeff : releaseCoeff) * (absIn - env);
 
         const float crackleProb = 0.00012f + ageNorm * 0.00020f + humFactor * 0.00008f;

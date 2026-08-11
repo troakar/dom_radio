@@ -48,6 +48,7 @@ DomRadioTrackAudioProcessorEditor::DomRadioTrackAudioProcessorEditor(DomRadioTra
     addAndMakeVisible(wowKnob);
     addAndMakeVisible(flutterKnob);
     addAndMakeVisible(tapeNoiseKnob);
+    addAndMakeVisible(ageKnob); // <--- ВОТ ЭТУ СТРОКУ НУЖНО ДОБАВИТЬ
 
     addAndMakeVisible(mixKnob);
     addAndMakeVisible(outLvlKnob);
@@ -166,9 +167,10 @@ void DomRadioTrackAudioProcessorEditor::resized()
     biasKnob.setBounds(p2Rect.getX() + 108,  p2Rect.getY() + 145, 70, 52);
     biasSagKnob.setBounds(p2Rect.getX() + 197, p2Rect.getY() + 145, 70, 52);
     tapeModelCombo.setBounds(p2Rect.getX() + 15, p2Rect.getY() + 208, p2Rect.getWidth() - 30, 24);
-    wowKnob.setBounds(p2Rect.getX() + 15,   p2Rect.getY() + 238, 70, 50);
-    flutterKnob.setBounds(p2Rect.getX() + 95,  p2Rect.getY() + 238, 70, 50);
-    tapeNoiseKnob.setBounds(p2Rect.getX() + 175, p2Rect.getY() + 238, 70, 50);
+    wowKnob.setBounds(p2Rect.getX() + 15,   p2Rect.getY() + 238, 62, 50);
+    flutterKnob.setBounds(p2Rect.getX() + 83,  p2Rect.getY() + 238, 62, 50);
+    tapeNoiseKnob.setBounds(p2Rect.getX() + 151, p2Rect.getY() + 238, 62, 50);
+    ageKnob.setBounds(p2Rect.getX() + 219,       p2Rect.getY() + 238, 62, 50); // Вуаля!
 
     // Блок 3 (Идеальная компоновка 4 ручек шириной 65px внутри панели шириной 286px)
     mixKnob.setBounds(p3Rect.getX() + 5,  p3Rect.getY() + 32, 65, 60);

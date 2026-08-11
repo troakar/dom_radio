@@ -83,14 +83,7 @@ void DomRadioDriveAudioProcessor::prepareToPlay (double sampleRate, int samplesP
     dcBlockL.prepare(sampleRate); dcBlockR.prepare(sampleRate);
     dcBlockL.reset(); dcBlockR.reset();
 
-    const float latency = oversampler->getLatencyInSamples();
-    setLatencySamples(static_cast<int>(latency));
-    
-    dryDelayL.prepare({ sampleRate, (juce::uint32)samplesPerBlock, 1 });
-    dryDelayR.prepare({ sampleRate, (juce::uint32)samplesPerBlock, 1 });
-    dryDelayL.reset(); dryDelayR.reset();
-    
-    dryBuffer.setSize(2, samplesPerBlock + 1024);
+    setLatencySamples(static_cast<int>(oversampler->getLatencyInSamples()));
 
     inGainSmoothed.reset(sampleRate, 0.010);
     driveSmoothed.reset(sampleRate, 0.020);
@@ -115,8 +108,6 @@ void DomRadioDriveAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
 
     if (numSamples == 0 || oversampler == nullptr) return;
 
-    if (dryBuffer.getNumSamples() < numSamples)
-        dryBuffer.setSize(2, numSamples, true, true, true);
     if (osWorkBuffer.getNumSamples() < numSamples)
         osWorkBuffer.setSize(2, numSamples, false, false, true);
 
@@ -126,8 +117,28 @@ void DomRadioDriveAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     mixSmoothed.setTargetValue(mixParam->load() / 100.0f);
     outLvlSmoothed.setTargetValue(juce::Decibels::decibelsToGain(outLvlParam->load()));
 
-    const int type = static_cast<int>(driveTypeParam->load());
-    const float hfeMultiplier = (type == 1) ? 1.35f : 1.0f; 
+    const int driveType = static_cast<int>(driveTypeParam->load());
+    const float currentDrive = driveSmoothed.getCurrentValue();
+    const float currentIron  = ironCoreSmoothed.getCurrentValue();
+    const float currentMix   = mixSmoothed.getCurrentValue();
+
+    driveSmoothed.skip(numSamples);
+    ironCoreSmoothed.skip(numSamples);
+    mixSmoothed.skip(numSamples);
+
+    // --- BOUTIQUE EQUAL-LOUDNESS GAIN STAGING (Из старших версий) ---
+    const float driveNorm = juce::jlimit(0.0f, 1.0f, (currentDrive - 1.0f) / 9.0f);
+    const float preampDriveShape = std::pow(driveNorm, 1.25f);
+    const float effectivePreampPressure = juce::jlimit(0.70f, 1.60f, 0.70f + preampDriveShape * 0.90f);
+    const float effectivePreampDrive = juce::jlimit(1.0f, 10.0f, 1.0f + driveNorm * 9.0f * effectivePreampPressure);
+
+    const float hfeMultiplier = (driveType == 1) ? 1.15f : 1.0f; // Винтажный германий злее
+    const float finalDrive = effectivePreampDrive * hfeMultiplier;
+    const float presence = 0.1f + (finalDrive * 0.02f);
+
+    const float driveTypeComp = (driveType == 1) ? 1.10f : 1.0f; 
+    const float preampCompensation = 1.0f / (1.0f + std::pow(driveNorm, 0.70f) * 2.15f * driveTypeComp);
+    const float finalPostGain = 1.0f + (preampCompensation - 1.0f) * currentMix;
 
     if (inGainSmoothed.isSmoothing()) {
         for (int i = 0; i < numSamples; ++i) {
@@ -138,9 +149,6 @@ void DomRadioDriveAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     } else {
         buffer.applyGain(inGainSmoothed.getCurrentValue());
     }
-
-    for (int ch = 0; ch < numChannels; ++ch)
-        dryBuffer.copyFrom(ch, 0, buffer, ch, 0, numSamples);
 
     osWorkBuffer.copyFrom(0, 0, buffer, 0, 0, numSamples);
     if (numChannels > 1) osWorkBuffer.copyFrom(1, 0, buffer, 1, 0, numSamples);
@@ -154,23 +162,19 @@ void DomRadioDriveAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     auto* osL = osBlock.getChannelPointer(0);
     auto* osR = osBlock.getChannelPointer(1);
 
-    const float targetDrive = driveSmoothed.getCurrentValue();
-    const float targetIron = ironCoreSmoothed.getCurrentValue();
-
-    driveSmoothed.skip(numSamples);
-    ironCoreSmoothed.skip(numSamples);
-
     for (int i = 0; i < osNumSamples; ++i)
     {
+        // Левый канал
         float wetL = osL[i];
-        wetL = transL.process(wetL, targetIron);
-        wetL = spiralL.process(wetL, targetDrive * hfeMultiplier, 0.1f);
-        osL[i] = wetL;
+        wetL = transL.process(wetL, currentIron, currentMix);
+        wetL = spiralL.process(wetL, finalDrive, presence, currentMix);
+        osL[i] = wetL * finalPostGain;
 
+        // Правый канал
         float wetR = osR[i];
-        wetR = transR.process(wetR, targetIron);
-        wetR = spiralR.process(wetR, targetDrive * hfeMultiplier, 0.1f);
-        osR[i] = wetR;
+        wetR = transR.process(wetR, currentIron, currentMix);
+        wetR = spiralR.process(wetR, finalDrive, presence, currentMix);
+        osR[i] = wetR * finalPostGain;
     }
 
     oversampler->processSamplesDown(block);
@@ -180,26 +184,16 @@ void DomRadioDriveAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
 
     auto* wetL_ptr = buffer.getWritePointer(0);
     auto* wetR_ptr = numChannels > 1 ? buffer.getWritePointer(1) : nullptr;
-    auto* dryL_ptr = dryBuffer.getReadPointer(0);
-    auto* dryR_ptr = numChannels > 1 ? dryBuffer.getReadPointer(1) : nullptr;
-
-    const float latency = oversampler->getLatencyInSamples();
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const float currentMix = mixSmoothed.getNextValue();
         const float currentOut = outLvlSmoothed.getNextValue();
 
-        float dL = dryDelayL.popSample(0, latency);
-        dryDelayL.pushSample(0, dryL_ptr[i]);
-        float mixedL = dL * (1.0f - currentMix) + wetL_ptr[i] * currentMix;
-        wetL_ptr[i] = dcBlockL.process(clipL.process(mixedL * currentOut));
+        // Клиппер тоже поддерживает Smart-Mix, DC Blocker чистит результат
+        wetL_ptr[i] = dcBlockL.process(clipL.process(wetL_ptr[i] * currentOut, currentMix));
 
-        if (wetR_ptr && dryR_ptr) {
-            float dR = dryDelayR.popSample(0, latency);
-            dryDelayR.pushSample(0, dryR_ptr[i]);
-            float mixedR = dR * (1.0f - currentMix) + wetR_ptr[i] * currentMix;
-            wetR_ptr[i] = dcBlockR.process(clipR.process(mixedR * currentOut));
+        if (wetR_ptr) {
+            wetR_ptr[i] = dcBlockR.process(clipR.process(wetR_ptr[i] * currentOut, currentMix));
         }
     }
 }

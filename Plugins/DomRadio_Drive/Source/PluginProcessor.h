@@ -39,8 +39,6 @@ private:
 
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
     juce::AudioBuffer<float> osWorkBuffer;
-    juce::AudioBuffer<float> dryBuffer;
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> dryDelayL { 2048 }, dryDelayR { 2048 };
 
     TroakarDSP::InputTransformer transL, transR;
     TroakarDSP::Spiral2Core spiralL, spiralR;
