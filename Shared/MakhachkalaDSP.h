@@ -458,6 +458,8 @@ public:
         biasMidPeak.prepare(sampleRate);
         biasHighShelf.prepare(sampleRate);
         archiveCompensationPeak.prepare(sampleRate);
+        archiveCompensationBody.prepare(sampleRate);
+        archiveCompensationDip.prepare(sampleRate);
 preEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sampleRate, 1000.0, 0.707, 1.0);
 deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sampleRate, 1000.0, 0.707, 1.0);
         headBumpPrimary.coefficients = juce::dsp::IIR::Coefficients<double>::makeAllPass(sampleRate, 1000.0);
@@ -504,6 +506,8 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
         biasMidPeak.reset();
         biasHighShelf.reset();
         archiveCompensationPeak.reset();
+        archiveCompensationBody.reset();
+        archiveCompensationDip.reset();
     }
 
     TapeCurve getTapeCurve(float speedNorm, int eqMode) const noexcept
@@ -670,18 +674,33 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
             gapLoss.setLowPass(currentGapFreq, 0.707f);
             lastAppliedGapFreq = currentGapFreq;
 
-            // === ARCHIVE COMPENSATORY PEAK (Mechlabor style) ===
-            const float wearThreshold = 0.2f;
-            float peakGainDb = 0.0f;
+            // === ARCHIVE COMPENSATORY RIPPLE CASCADE (Mechlabor / Studer Style) ===
+            const float wearThreshold = 0.15f;
+            float activeWear = 0.0f;
             if (ageNorm > wearThreshold) {
-                float activeWear = (ageNorm - wearThreshold) / (1.0f - wearThreshold);
-                peakGainDb = activeWear * activeWear * 14.0f;
+                activeWear = (ageNorm - wearThreshold) / (1.0f - wearThreshold);
             }
 
-            float peakFreq = 14000.0f - (ageNorm * 8000.0f);
-            float peakQ = 1.0f + ageNorm * 2.5f;
+            const float wearShape = activeWear * activeWear;
+
+            // 1. Основной острый пик износа зазора
+            const float peakFreq = 14000.0f - (activeWear * 8000.0f);
+            const float peakQ = 1.2f + activeWear * 2.3f;
+            const float peakGainDb = wearShape * 11.0f;
+
+            // 2. Широкая "подушка" снизу (широкий белл большей площади)
+            const float bodyFreq = peakFreq * 0.62f;
+            const float bodyQ = 0.55f + activeWear * 0.25f;
+            const float bodyGainDb = activeWear * 4.0f;
+
+            // 3. Интерференционный микро-дип сверху (создает нелинейную волну АЧХ)
+            const float dipFreq = juce::jmin(21000.0f, peakFreq * 1.45f);
+            const float dipQ = 1.8f + activeWear * 1.2f;
+            const float dipGainDb = -activeWear * 3.2f;
 
             archiveCompensationPeak.setPeakFilter(peakFreq, peakQ, juce::Decibels::decibelsToGain(peakGainDb * mixAmount));
+            archiveCompensationBody.setPeakFilter(bodyFreq, bodyQ, juce::Decibels::decibelsToGain(bodyGainDb * mixAmount));
+            archiveCompensationDip.setPeakFilter(dipFreq, dipQ, juce::Decibels::decibelsToGain(dipGainDb * mixAmount));
         }
     }
 
@@ -702,6 +721,8 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
         out = profileMidContour.processSample(out);
 
         out = archiveCompensationPeak.processSample(out);
+        out = archiveCompensationBody.processSample(out);
+        out = archiveCompensationDip.processSample(out);
 
         if (biasFiltersActive) {
             out = biasLowShelf.processSample(out);
@@ -746,7 +767,9 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
                           * headBumpSecondary.coefficients->getMagnitudeForFrequency(freq, sr);
         const double gap = gapLoss.getMagnitudeForFrequency(freq);
         const double contour = profileMidContour.getMagnitudeForFrequency(freq);
-        const double archiveComp = archiveCompensationPeak.getMagnitudeForFrequency(freq);
+        const double archiveComp = archiveCompensationPeak.getMagnitudeForFrequency(freq)
+                                  * archiveCompensationBody.getMagnitudeForFrequency(freq)
+                                  * archiveCompensationDip.getMagnitudeForFrequency(freq);
         double biasResponse = 1.0;
         if (biasFiltersActive) {
             biasResponse = biasLowShelf.getMagnitudeForFrequency(freq)
@@ -823,6 +846,8 @@ private:
     juce::dsp::IIR::Filter<double> headBumpDip;
     juce::dsp::IIR::Filter<double> headBumpSecondary;
     FastBiquad archiveCompensationPeak;
+    FastBiquad archiveCompensationBody;
+    FastBiquad archiveCompensationDip;
     const ToleranceModel::ComponentTolerances* tolerances = nullptr;
 };
 
