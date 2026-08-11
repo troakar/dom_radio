@@ -231,6 +231,8 @@ void DomRadioTrackAudioProcessor::prepareToPlay (double sampleRate, int samplesP
     clipR.prepare(sampleRate);
     finalDcBlockL.prepare(sampleRate);
     finalDcBlockR.prepare(sampleRate);
+    noiseDecayFilterL.prepare(sampleRate);
+    noiseDecayFilterR.prepare(sampleRate);
     finalDcBlockL.reset();
     finalDcBlockR.reset();
     
@@ -319,6 +321,8 @@ void DomRadioTrackAudioProcessor::resetProcessingState()
     
     finalDcBlockL.reset();
     finalDcBlockR.reset();
+    noiseDecayFilterL.reset();
+    noiseDecayFilterR.reset();
     vuEnvL = 0.0f;
     vuEnvR = 0.0f;
     
@@ -628,16 +632,20 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
             float combinedGrainL = midGrainL * 0.7f + highGrainL * 0.3f;
 
             float noiseCurve = currentNoise * currentNoise;
-            float additiveNoiseL = combinedGrainL * noiseCurve * 0.2f;
-            finalL += additiveNoiseL;
+            float additiveNoiseL = combinedGrainL * noiseCurve * 0.6f;
+
+            float noiseCutoff = juce::jlimit(4000.0f, 20000.0f, 18000.0f - currentNoise * 4000.0f);
+            noiseDecayFilterL.setLowPass(noiseCutoff, 0.707f);
+            finalL += noiseDecayFilterL.processSample(additiveNoiseL);
 
             if (wetR != nullptr) {
                 float midGrainR  = velvetGrainR.process(finalR, modeEnum, tapeSpeedNorm, ageNorm);
                 float highGrainR = vinylGrainR.process(finalR, modeEnum, tapeSpeedNorm, ageNorm);
                 float combinedGrainR = midGrainR * 0.7f + highGrainR * 0.3f;
 
-                float additiveNoiseR = combinedGrainR * noiseCurve * 0.2f;
-                finalR += additiveNoiseR;
+                float additiveNoiseR = combinedGrainR * noiseCurve * 0.6f;
+                noiseDecayFilterR.setLowPass(noiseCutoff, 0.707f);
+                finalR += noiseDecayFilterR.processSample(additiveNoiseR);
             }
         }
 

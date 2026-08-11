@@ -114,6 +114,7 @@ private:
 
     TroakarDSP::TransformerClipper clipL, clipR;
     TroakarDSP::DCBlocker finalDcBlockL, finalDcBlockR;
+    TroakarDSP::FastBiquad noiseDecayFilterL, noiseDecayFilterR;
     
     float vuEnvL = 0.0f, vuEnvR = 0.0f;
     float meterAttackCoeff = 0.0f, meterReleaseCoeff = 0.0f;
