@@ -28,6 +28,8 @@ private:
     juce::Image backgroundCache;
     juce::Image persistenceBuffer;
     int draggingNode = -1;
+    float dragStartFreq = 0.0f;
+    float dragStartGain = 0.0f;
 
     static constexpr float maxDb = 12.0f;
     const juce::Colour phosphor { juce::Colour::fromRGB(255, 176, 40) };

@@ -440,6 +440,7 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     float airGain = airSmoothed.getCurrentValue();
     const float biasRaw = juce::jlimit(-1.0f, 1.0f, biasSmoothed.getCurrentValue());
     const float mixAmount = mixSmoothed.getCurrentValue();
+    const float currentAge = ageSmoothed.getCurrentValue();
     float tapeBias = 0.0f;
     if (std::abs(biasRaw) > 0.001f)
     {
@@ -466,11 +467,12 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
         auto* osR = osBlock.getChannelPointer(1);
 
         if (tapeSpeedNorm != lastTapeSpeed || eqStd != lastEqStd || tapeModel != lastTapeModel
-            || std::abs(airGain - lastAirGain) > 0.005f || std::abs(mixAmount - lastMixAmount) > 0.005f)
+            || std::abs(airGain - lastAirGain) > 0.005f || std::abs(mixAmount - lastMixAmount) > 0.005f
+            || std::abs(currentAge - lastAge) > 0.05f)
         {
             isEqUpdating.store(true, std::memory_order_release);
-            wetChainL.eq.updateParameters(tapeSpeedNorm, eqStd, airGain, 0.0f, 0.0f, tapeProfile, mixAmount);
-            wetChainR.eq.updateParameters(tapeSpeedNorm, eqStd, airGain, 0.0f, 0.0f, tapeProfile, mixAmount);
+            wetChainL.eq.updateParameters(tapeSpeedNorm, eqStd, airGain, 0.0f, currentAge, tapeProfile, mixAmount);
+            wetChainR.eq.updateParameters(tapeSpeedNorm, eqStd, airGain, 0.0f, currentAge, tapeProfile, mixAmount);
             wetChainL.trans.updateParameters(mixAmount);
             wetChainR.trans.updateParameters(mixAmount);
             wetChainL.tapeProfile.updateProfile(tapeProfile);
@@ -482,6 +484,7 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
             lastTapeModel = tapeModel;
             lastAirGain = airGain;
             lastMixAmount = mixAmount;
+            lastAge = currentAge;
         }
 
         if (std::abs(bassSmoothed.getCurrentValue() * mixAmount - lastBass) > 0.01f || std::abs(trebleSmoothed.getCurrentValue() * mixAmount - lastTreble) > 0.01f
@@ -617,6 +620,8 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
         float finalL = wetL[i];
         float finalR = wetR != nullptr ? wetR[i] : 0.0f;
 
+        const float currentAge = ageSmoothed.getNextValue();
+
         const auto modMaster = wowGenL.generate(tapeSpeedNorm, effWow, effFlutter);
         const auto modR_raw  = wowGenR.generate(tapeSpeedNorm, effWow, effFlutter);
 
@@ -630,16 +635,15 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
             displayFlutter.store(juce::jlimit(-1.0f, 1.0f, modMaster.flutter), std::memory_order_relaxed);
         }
 
-        finalL = mechL.process(finalL, tapeSpeedNorm, mixAmount, 0.0f, 0.0f, true, modL);
+        finalL = mechL.process(finalL, tapeSpeedNorm, mixAmount, 0.0f, currentAge, true, modL);
         if (wetR != nullptr)
-            finalR = mechR.process(finalR, tapeSpeedNorm, mixAmount, 0.0f, 0.0f, false, modR);
+            finalR = mechR.process(finalR, tapeSpeedNorm, mixAmount, 0.0f, currentAge, false, modR);
 
         const float currentNoise = noiseSmoothed.getNextValue() * mixAmount;
-        const float currentAge   = ageSmoothed.getNextValue() * mixAmount;
         const float ageNorm      = juce::jlimit(0.0f, 1.0f, currentAge / 50.0f);
 
         if (currentNoise > 0.0001f) {
-            const auto modeEnum = TroakarDSP::NoiseMode::staticNoise;
+            const auto modeEnum = TroakarDSP::NoiseMode::dynamicNoise;
 
             float midGrainL  = velvetGrainL.process(finalL, modeEnum, tapeSpeedNorm, ageNorm);
             float highGrainL = vinylGrainL.process(finalL, modeEnum, tapeSpeedNorm, ageNorm);
@@ -651,7 +655,10 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
             float rawNoiseSumL = (additiveNoiseL + contactNoiseL) * 0.6f;
 
             float noiseCutoff = juce::jlimit(4000.0f, 20000.0f, 18000.0f - ageNorm * 4000.0f - currentNoise * 2000.0f);
-            noiseDecayFilterL.setLowPass(noiseCutoff, 0.707f);
+            if (i % 32 == 0) {
+                noiseDecayFilterL.setLowPass(noiseCutoff, 0.707f);
+                noiseDecayFilterR.setLowPass(noiseCutoff, 0.707f);
+            }
             finalL += noiseDecayFilterL.processSample(rawNoiseSumL);
 
             if (wetR != nullptr) {
@@ -663,7 +670,6 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
                 float contactNoiseR = contactR.process(finalR, currentAge, 0.0f, modeEnum) * currentNoise;
                 float rawNoiseSumR = (additiveNoiseR + contactNoiseR) * 0.6f;
 
-                noiseDecayFilterR.setLowPass(noiseCutoff, 0.707f);
                 finalR += noiseDecayFilterR.processSample(rawNoiseSumR);
             }
         }

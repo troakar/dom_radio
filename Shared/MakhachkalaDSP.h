@@ -67,7 +67,7 @@ public:
         const float harmVar = tolerances ? tolerances->ironCoreHarmonics : 1.0f;
         constexpr float hdTrim = TapesDSP::harmonicDistortionTrim;
 
-        const float magnetised = std::tanh(x - 0.08f * hdTrim * amount * x3 * harmVar
+        const float magnetised = fast_tanh(x - 0.08f * hdTrim * amount * x3 * harmVar
                                              + 0.015f * hdTrim * amount * x5 * harmVar);
 
         const float processed = value + (magnetised - low) * juce::jlimit(0.0f, 1.0f, amount * 1.5f * hdTrim);
@@ -348,7 +348,7 @@ public:
         const double pushGain = 1.0 + (adjustedDrive - 1.0) * 0.85 * TapesDSP::harmonicDistortionTrim;
 
         // 2. CLIP: жесткое транзисторное ограничение
-        float in = std::tanh(static_cast<float>(adjustedInput * pushGain));
+        float in = fast_tanh(static_cast<float>(adjustedInput * pushGain));
 
         // PULL убран: горячий сигнал (до 1.0) летит прямо в ленту
 
@@ -842,15 +842,15 @@ public:
         bassFreq = juce::jlimit(30.0f, 300.0f, bassFreq);
         trebleFreq = juce::jlimit(1000.0f, 15000.0f, trebleFreq);
 
-        // Pre-EQ (Накачиваем или ослабляем перед перегрузом)
-        preLow.setLowShelf(bassFreq, 0.5f, juce::Decibels::decibelsToGain(bassBoostDb));
-        preHigh.setHighShelf(trebleFreq, 0.707f, juce::Decibels::decibelsToGain(trebleBoostDb));
+        float bassQ = 0.40f + std::abs(bassBoostDb) * 0.01f;
+        float trebleQ = 0.50f + std::abs(trebleBoostDb) * 0.01f;
 
-        // Post-EQ (Компенсация только на 80%: 20% накачки остаётся как реальный
-        // тональный сдвиг, а не только как стимуляция гармоник)
+        preLow.setLowShelf(bassFreq, bassQ, juce::Decibels::decibelsToGain(bassBoostDb));
+        preHigh.setHighShelf(trebleFreq, trebleQ, juce::Decibels::decibelsToGain(trebleBoostDb));
+
         constexpr float compensationRatio = 0.8f;
-        postLow.setLowShelf(bassFreq, 0.5f, juce::Decibels::decibelsToGain(-bassBoostDb * compensationRatio));
-        postHigh.setHighShelf(trebleFreq, 0.707f, juce::Decibels::decibelsToGain(-trebleBoostDb * compensationRatio));
+        postLow.setLowShelf(bassFreq, bassQ, juce::Decibels::decibelsToGain(-bassBoostDb * compensationRatio));
+        postHigh.setHighShelf(trebleFreq, trebleQ, juce::Decibels::decibelsToGain(-trebleBoostDb * compensationRatio));
     }
 
     forcedinline float processPre(float input) {
@@ -895,9 +895,11 @@ public:
         bassFrequency = juce::jlimit(30.0f, 200.0f, bassFrequency);
         trebleFrequency = juce::jlimit(2000.0f, 15000.0f, trebleFrequency);
 
-        // Биквад с gain=1 нейтрален, отдельная ветка allpass не нужна.
-        lowShelf.setLowShelf(bassFrequency, 0.5f, juce::Decibels::decibelsToGain(bassBoostDb));
-        highShelf.setHighShelf(trebleFrequency, 0.8f, juce::Decibels::decibelsToGain(trebleBoostDb));
+        float bassQ = 0.35f + std::abs(bassBoostDb) * 0.012f;
+        float trebleQ = 0.45f + std::abs(trebleBoostDb) * 0.012f;
+
+        lowShelf.setLowShelf(bassFrequency, bassQ, juce::Decibels::decibelsToGain(bassBoostDb));
+        highShelf.setHighShelf(trebleFrequency, trebleQ, juce::Decibels::decibelsToGain(trebleBoostDb));
     }
 
     forcedinline float process(float input) {
@@ -957,7 +959,7 @@ public:
             const float excess = absInput - knee;
             const float range = ceiling - knee;
             
-            const float compressed = range * std::tanh((excess / range) * TapesDSP::harmonicDistortionTrim);
+            const float compressed = range * fast_tanh((excess / range) * TapesDSP::harmonicDistortionTrim);
             output = sign * (knee + compressed);
 
             transformerFlux += (output - transformerFlux) * 0.15f;
@@ -1078,7 +1080,8 @@ public:
     }
 
 private:
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLineLows, delayLineHighs;
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delayLineLows;
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLineHighs;
     juce::dsp::IIR::Filter<double> crossover;
     double sr = 44100.0;
     float aziPhase = 0.0f;
@@ -1237,13 +1240,7 @@ public:
         const float flutterScale = juce::jlimit(0.0f, 1.0f, flutterAmount);
 
         // --- 1. WOW: Ornstein-Uhlenbeck Process с фильтрованным шумом ---
-        float u1 = std::max(1.0e-7f, rng.nextFloat());
-        float u2 = rng.nextFloat();
-        float r = std::sqrt(-2.0f * std::log(u1));
-        float theta = juce::MathConstants<float>::twoPi * u2 - juce::MathConstants<float>::pi;
-
-        // Сырой Гауссовский шум
-        float rawGaussian = r * std::cos(theta);
+        float rawGaussian = (rng.nextFloat() + rng.nextFloat() + rng.nextFloat() + rng.nextFloat() - 2.0f) * 1.732f;
 
         // Фильтруем шум, чтобы дрейф был плавным (вязкость мотора)
         float filteredGaussian = driftLpf.processSample(rawGaussian);
@@ -1296,9 +1293,9 @@ public:
         const float amp3 = -0.099f;
 
         // Сложная интерференция
-        const float complexFlutter = (amp1 * std::cos(phaseF1)) +
-                                     (amp2 * std::cos(phaseF2 + off2)) +
-                                     (amp3 * std::cos(phaseF3 + off3));
+        const float complexFlutter = (amp1 * juce::dsp::FastMathApproximations::cos(phaseF1)) +
+                                     (amp2 * juce::dsp::FastMathApproximations::cos(phaseF2 + off2)) +
+                                     (amp3 * juce::dsp::FastMathApproximations::cos(phaseF3 + off3));
 
         const float finalFlutter = complexFlutter * flutterScale * 2.5f;
 
@@ -1491,7 +1488,7 @@ public:
         }
         
         dynAttack = 1.0f - std::exp(-1.0f / (0.010f * static_cast<float>(sr)));
-        dynRelease = 1.0f - std::exp(-1.0f / (0.200f * static_cast<float>(sr)));
+        dynRelease = 1.0f - std::exp(-1.0f / (0.700f * static_cast<float>(sr)));
         
         reset();
     }
@@ -1563,7 +1560,7 @@ public:
 
         const float absIn = std::abs(input);
         const float attackCoeff = 1.0f - std::exp(-1.0f / (0.006f * static_cast<float>(sr)));
-        const float releaseCoeff = 1.0f - std::exp(-1.0f / (0.040f * static_cast<float>(sr)));
+        const float releaseCoeff = 1.0f - std::exp(-1.0f / (0.700f * static_cast<float>(sr)));
         env += (absIn > env ? attackCoeff : releaseCoeff) * (absIn - env);
 
         const float crackleProb = 0.00012f + ageNorm * 0.00020f + humFactor * 0.00008f;

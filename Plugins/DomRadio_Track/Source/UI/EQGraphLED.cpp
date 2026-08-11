@@ -152,7 +152,7 @@ void EQGraphLED::paint(juce::Graphics& g)
     }
 
     float noiseLvl = *processor.apvts.getRawParameterValue("TAPE_NOISE");
-    float ageLvl = 0.0f;
+    float ageLvl = *processor.apvts.getRawParameterValue("AGE") / 50.0f;
 
     if (noiseLvl > 0.01f || satIntensity > 0.1f)
     {
@@ -207,20 +207,39 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
                                             gainToY(*apvts.getRawParameterValue(gID)) }) < 15.0f;
     };
     draggingNode = hit("BASS_FREQ", "BASS") ? 2 : hit("TREBLE_FREQ", "TREBLE") ? 3 : -1;
+    
+    if (draggingNode == 2) {
+        dragStartFreq = *apvts.getRawParameterValue("BASS_FREQ");
+        dragStartGain = *apvts.getRawParameterValue("BASS");
+    } else if (draggingNode == 3) {
+        dragStartFreq = *apvts.getRawParameterValue("TREBLE_FREQ");
+        dragStartGain = *apvts.getRawParameterValue("TREBLE");
+    }
 }
 
 void EQGraphLED::mouseDrag(const juce::MouseEvent& e)
 {
     if (draggingNode < 0) return;
-    const float newFreq = xToFreq(juce::jlimit(0.0f, (float)getWidth(), e.position.x));
-    const float newGain = juce::jlimit(-18.0f, 18.0f, yToGain(e.position.y));
+    
+    const float sensitivity = e.mods.isShiftDown() ? 0.1f : 0.4f;
+    
+    const float deltaX = (float)e.getOffsetFromDragStart().x * sensitivity;
+    const float deltaY = (float)e.getOffsetFromDragStart().y * sensitivity;
+
+    const float freqRatio = std::pow(10.0f, (deltaX * 3.0f) / (float)getWidth());
+    const float newFreq = dragStartFreq * freqRatio;
+    
+    const float gainDelta = -(deltaY * maxDb) / ((float)getHeight() * 0.42f);
+    const float newGain = juce::jlimit(-18.0f, 18.0f, dragStartGain + gainDelta);
 
     auto apply = [&](const char* fID, const char* gID, float minF, float maxF) {
         auto* fp = processor.apvts.getParameter(fID);
         auto* gp = processor.apvts.getParameter(gID);
+        
         fp->setValueNotifyingHost(fp->convertTo0to1(juce::jlimit(minF, maxF, newFreq)));
         gp->setValueNotifyingHost(gp->convertTo0to1(newGain));
     };
+    
     if (draggingNode == 2) apply("BASS_FREQ", "BASS", 30.0f, 300.0f);
     else                   apply("TREBLE_FREQ", "TREBLE", 1000.0f, 15000.0f);
 }

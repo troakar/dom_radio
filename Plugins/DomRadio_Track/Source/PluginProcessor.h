@@ -140,6 +140,7 @@ private:
     int lastEqStd = -1, lastTapeModel = -1;
     float lastAirGain = -999.0f;
     float lastMixAmount = -1.0f;
+    float lastAge = -999.0f;
     float lastBass = -999.0f, lastTreble = -999.0f;
     float lastBassFrequency = -999.0f, lastTrebleFrequency = -999.0f;
     float lastPreBass = -999.0f, lastPreTreble = -999.0f;

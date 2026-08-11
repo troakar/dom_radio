@@ -7,7 +7,14 @@
 namespace TroakarDSP
 {
 
-    class FastRandom
+inline float fast_tanh(float x) {
+    float x2 = x * x;
+    float a = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
+    float b = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
+    return a / b;
+}
+
+class FastRandom
     {
     public:
         explicit FastRandom(uint32_t seed = 1) : state(seed == 0 ? 1 : seed) {}
@@ -413,7 +420,7 @@ public:
               * pressure
             + overBias * 0.020f;
 
-        const float saturated = std::tanh(input * profileDrive);
+        const float saturated = fast_tanh(input * profileDrive);
 
         const float saturationBlend = juce::jlimit(0.0f, 0.45f,
             tapeNorm * (0.22f + pressure * 0.28f) * TapesDSP::harmonicDistortionTrim);

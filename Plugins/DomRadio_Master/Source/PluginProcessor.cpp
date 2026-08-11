@@ -1,6 +1,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+using TroakarDSP::fast_tanh;
+
 #if JUCE_DEBUG
 inline void LOG_DEBUG(const juce::String& text)
 {
@@ -597,8 +599,6 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float effMix = mixSmoothed.getCurrentValue(); // ГЛАВНЫЙ СКАЛЯР (20 мс отклик)
     
     const float tapeFeedGain = 1.0f; 
-    const float wowAmount = wowAmountSmoothed.getCurrentValue() * effMix;
-    const float flutterAmount = flutterAmountSmoothed.getCurrentValue() * 0.4f * effMix; 
     const auto driveModel = driveType == 0 ? TroakarDSP::DriveType::silicon : TroakarDSP::DriveType::germanium;
     // Slew bypassed = 1.0
     float transient = 1.0f - ((1.0f - transientSmoothed.getCurrentValue()) * effMix);
@@ -796,7 +796,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
             if (wearAmount > 0.1f) {
                 float ceiling = 1.0f / (1.0f + wearAmount * 0.2f);
-                wet = std::tanh(wet * ceiling) / ceiling;
+                wet = fast_tanh(wet * ceiling) / ceiling;
             }
 
             wet = chain.emphasis.processPost(wet);
@@ -848,14 +848,23 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float effWow     = wowAmountSmoothed.getNextValue();
     const float effFlutter = flutterAmountSmoothed.getNextValue() * 0.5f;
 
+    const float currentDecay = decaySmoothed.getCurrentValue();
+    float noiseCutoff = 20000.0f - (ageNorm * 4000.0f) - (currentDecay * 400.0f);
+    noiseCutoff = juce::jlimit(4000.0f, 20000.0f, noiseCutoff);
+    noiseDecayFilterL.setLowPass(noiseCutoff, 0.707f);
+    noiseDecayFilterR.setLowPass(noiseCutoff, 0.707f);
+
     for (int i = 0; i < numSamples; ++i)
     {
         const float currentOutput = outputGainSmoothed.getNextValue();
         
         const auto modulationL = wowGenL.generate(tapeSpeedNorm, effWow, effFlutter);
         const auto modulationR = wowGenR.generate(tapeSpeedNorm, effWow, effFlutter);
-        displayWow.store(juce::jlimit(-1.0f, 1.0f, (modulationL.wow + modulationR.wow) * 0.5f), std::memory_order_relaxed);
-        displayFlutter.store(juce::jlimit(-1.0f, 1.0f, (modulationL.flutter + modulationR.flutter) * 0.5f), std::memory_order_relaxed);
+
+        if (i == 0) {
+            displayWow.store(juce::jlimit(-1.0f, 1.0f, (modulationL.wow + modulationR.wow) * 0.5f), std::memory_order_relaxed);
+            displayFlutter.store(juce::jlimit(-1.0f, 1.0f, (modulationL.flutter + modulationR.flutter) * 0.5f), std::memory_order_relaxed);
+        }
         
         const float humSample = humGen.process(effHum);
 
@@ -889,12 +898,6 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
         float intermodL = 1.0f + combinedGrainL * intermodDepthL;
         blendedL *= intermodL;
 
-        const float currentDecay = decaySmoothed.getCurrentValue();
-        float noiseCutoff = 20000.0f - (ageNorm * 4000.0f) - (currentDecay * 400.0f);
-        noiseCutoff = juce::jlimit(4000.0f, 20000.0f, noiseCutoff);
-        
-        noiseDecayFilterL.setLowPass(noiseCutoff, 0.707f);
-
         float noiseCurve = effTapeNoise * (0.45f + 0.55f * effTapeNoise);
         float additiveNoiseL = combinedGrainL * noiseCurve * (0.45f + ageNorm * 0.15f);
         float contactNoiseL = contactL.process(blendedL, currentAgeForScrape, effHum, modeEnum) * effTapeNoise;
@@ -903,8 +906,6 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
         if (wetR != nullptr)
         {
-            noiseDecayFilterR.setLowPass(noiseCutoff, 0.707f);
-            
             float midGrainR  = velvetGrainR.process(blendedR, modeEnum, tapeSpeedNorm, ageNorm);
             float highGrainR = vinylGrainR.process(blendedR, modeEnum, tapeSpeedNorm, ageNorm);
             float combinedGrainR = midGrainR * (1.0f - ageNorm * 0.2f) + highGrainR * (0.30f + ageNorm * 0.70f);

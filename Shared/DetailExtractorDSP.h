@@ -147,7 +147,7 @@ public:
         float detailsOnly = detailSignal - input;
 
         const float hdTrim = TapesDSP::harmonicDistortionTrim;
-        float satDetails = std::tanh(detailsOnly * 1.5f) + (detailsOnly * detailsOnly * 0.08f * hdTrim);
+        float satDetails = fast_tanh(detailsOnly * 1.5f) + (detailsOnly * detailsOnly * 0.08f * hdTrim);
         
         satDetails = satDetails / (1.0f + std::abs(satDetails) * 0.2f);
 
