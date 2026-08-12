@@ -74,9 +74,9 @@ public:
         for (int i = 0; i < 4; ++i) mbEnvelope[i] = 0.0f;
     }
 
-    forcedinline float process(float input, float amount, float tilt, ExtractorAlgorithm algo)
+    forcedinline float process(float input, float rawAmount, float tilt, ExtractorAlgorithm algo, float mixAmount = 1.0f)
     {
-        if (amount <= 0.001f)
+        if (rawAmount <= 0.001f || mixAmount <= 0.001f)
         {
             currentDynGainDb *= 0.9f;
             return input;
@@ -103,7 +103,7 @@ public:
             wbTiltLow.setLowShelf(800.0, 0.4, juce::Decibels::decibelsToGain(-tiltBoostDb));
             wbTiltHigh.setHighShelf(1200.0, 0.4, juce::Decibels::decibelsToGain(tiltBoostDb));
 
-            detailSignal = input * juce::Decibels::decibelsToGain(currentDynGainDb * amount);
+            detailSignal = input * juce::Decibels::decibelsToGain(currentDynGainDb * rawAmount);
             detailSignal = wbTiltHigh.processSample(wbTiltLow.processSample(detailSignal));
         }
         else
@@ -137,7 +137,7 @@ public:
 
                 avgGainDb += bandGainDb;
                 
-                const float linearGain = juce::Decibels::decibelsToGain(bandGainDb * weights[i] * amount);
+                const float linearGain = juce::Decibels::decibelsToGain(bandGainDb * weights[i] * rawAmount);
                 detailSignal += b[i] * linearGain;
             }
 
@@ -151,14 +151,11 @@ public:
         
         satDetails = satDetails / (1.0f + std::abs(satDetails) * 0.2f);
 
-        // ==== ИСПРАВЛЕНИЕ GAIN STAGING ====
-        // Алгоритм вытаскивания деталей (Upward Compression) экстремально накачивает RMS.
-        // Чтобы громкость не "прыгала", мы вводим плавную макро-компенсацию,
-        // которая снижает общий уровень пропорционально Amount.
-        const float volumeCompensation = 1.0f / (1.0f + amount * 1.25f); 
+        const float volumeCompensation = 1.0f / (1.0f + rawAmount * 1.25f); 
 
-        // Подмес: (dry сигнал + вытянутые детали) * компенсацию громкости
-        return (input + satDetails) * volumeCompensation; 
+        float fullyProcessed = (input + satDetails) * volumeCompensation; 
+
+        return input + (fullyProcessed - input) * mixAmount; 
     }
 
     float getCurrentDetailGainDb() const noexcept { return currentDynGainDb; }

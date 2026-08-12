@@ -312,7 +312,6 @@ void DomRadioMasterAudioProcessor::prepareToPlay (double sampleRate, int samples
     wetChainL.prepare(osRate, osMaxBlock);
     wetChainR.prepare(osRate, osMaxBlock);
 
-    clipL.prepare(sampleRate); clipR.prepare(sampleRate);
     finalDcBlockL.prepare(sampleRate); finalDcBlockR.prepare(sampleRate);
     finalDcBlockL.reset(); finalDcBlockR.reset();
     
@@ -516,8 +515,6 @@ void DomRadioMasterAudioProcessor::applyTmtToAllModules()
     wetChainL.setTolerances(tolL);
     wetChainR.setTolerances(tolR);
 
-    clipL.setTolerances(tolL);
-    clipR.setTolerances(tolR);
     mechL.setTolerances(tolL);
     mechR.setTolerances(tolR);
     crosstalk.setTolerances(tolL);
@@ -726,7 +723,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     const float currentAgeForScrape = ageSmoothed.getCurrentValue(); // Убрали * effMix
     const float effAzimuth = azimuthSmoothed.getCurrentValue() * effMix;
     int noiseMode = static_cast<int>(noiseModeParam->load());
-    const float detAmount = detailAmountParam->load() / 100.0f * effMix;
+    const float detAmountRaw = detailAmountParam->load() / 100.0f;
     const float detTilt = detailTiltParam->load() / 100.0f;
     const auto detAlgo = static_cast<TroakarDSP::ExtractorAlgorithm>(detailAlgoParam->load());
 
@@ -868,7 +865,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
             wet = chain.emphasis.processPost(wet);
             wet = chain.pultec.process(wet);
             wet = chain.scrape.process(wet, currentAgeForScrape, scrapeFlutter * thermal.scrapeMult);
-            wet = chain.detailExtractor.process(wet, detAmount, detTilt, detAlgo);
+            wet = chain.detailExtractor.process(wet, detAmountRaw, detTilt, detAlgo, effMix);
 
             return wet * finalPostGain;
         };
@@ -981,13 +978,13 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
             blendedR += noiseDecayFilterR.processSample(rawNoiseSumR);
         }
 
-        wetL[i] = finalDcBlockL.process(clipL.process(blendedL * currentOutput * tmtGainL, effMix));
+        wetL[i] = finalDcBlockL.process(blendedL * currentOutput * tmtGainL);
         const float absL = std::abs(wetL[i]);
         vuEnvL += (absL > vuEnvL ? meterAttackCoeff : meterReleaseCoeff) * (absL - vuEnvL);
 
         if (wetR != nullptr)
         {
-            wetR[i] = finalDcBlockR.process(clipR.process(blendedR * currentOutput * tmtGainR, effMix));
+            wetR[i] = finalDcBlockR.process(blendedR * currentOutput * tmtGainR);
             const float absR = std::abs(wetR[i]);
             vuEnvR += (absR > vuEnvR ? meterAttackCoeff : meterReleaseCoeff) * (absR - vuEnvR);
         }

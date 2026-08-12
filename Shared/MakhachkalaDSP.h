@@ -51,9 +51,9 @@ public:
         const float gainVariation = tolerances ? tolerances->inputTransformerGain : 1.0f;
         value *= (1.0f + (gainVariation - 1.0f) * mixAmount);
 
-        const float amount = juce::jlimit(0.0f, 1.0f, ironAmount);
+        const float amount = juce::jlimit(0.0f, 1.0f, ironAmount * mixAmount);
         if (amount <= 0.0001f)
-            return input + (value - input) * mixAmount;
+            return value;
 
         // 3. Детектор магнитного потока и нелинейное насыщение железа
         const float low = lowPass.processSample(value);
@@ -72,8 +72,7 @@ public:
 
         const float processed = value + (magnetised - low) * juce::jlimit(0.0f, 1.0f, amount * 1.5f * hdTrim);
 
-        // 4. Smart Mix: плавный бленд с гарантией сохранения фазы
-        return input + (processed - input) * mixAmount;
+        return processed;
     }
 
 private:
@@ -341,25 +340,21 @@ public:
         const float biasShift = tolerances ? tolerances->spiralBiasShift : 0.0f;
         const float hfeVar    = tolerances ? tolerances->transistorHfe    : 1.0f;
 
-        const float adjustedInput = input * (1.0f + biasShift * 0.04f);
+        const float adjustedInput = input * (1.0f + biasShift * 0.04f * mixAmount);
         const double adjustedDrive = drive * static_cast<double>(hfeVar);
 
-        // 1. PUSH: накачиваем громкость перед транзисторами.
-        const double pushGain = 1.0 + (adjustedDrive - 1.0) * 0.85 * TapesDSP::harmonicDistortionTrim;
+        const double pushGain = 1.0 + (adjustedDrive - 1.0) * 0.85 * TapesDSP::harmonicDistortionTrim * mixAmount;
 
-        // 2. CLIP: жесткое транзисторное ограничение
         float in = fast_tanh(static_cast<float>(adjustedInput * pushGain));
-
-        // PULL убран: горячий сигнал (до 1.0) летит прямо в ленту
 
         const float absIn = std::abs(in);
         if (absIn < 1.0e-4f)
             return in;
 
-        // 3. SHAPE: добавляем транзисторную "искристость"
         const float shaped = std::sin(in * absIn) / absIn;
-        float processed = in + (shaped - in) * TapesDSP::harmonicDistortionTrim;
-        return input + (processed - input) * mixAmount;
+        float processed = in + (shaped - in) * TapesDSP::harmonicDistortionTrim * mixAmount;
+        
+        return processed; 
     }
 
 private:
@@ -922,78 +917,6 @@ private:
     float currentBassDb = 0.0f;
     float currentTrebleDb = 0.0f;
     FastBiquad lowShelf, highShelf;
-};
-
-class TransformerClipper {
-public:
-    void prepare(double sampleRate) {
-        sr = sampleRate;
-        transformerFlux = 0.0f;
-        clippingEnvelope = 0.0f;
-        outputShelf.prepare(sampleRate);
-        applyToleranceFilterCoefficients();
-    }
-
-    // TMT: подставить допуски
-    void setTolerances(const ToleranceModel::ComponentTolerances* t) noexcept {
-        tolerances = t;
-        applyToleranceFilterCoefficients();
-    }
-
-    forcedinline float process(float input, float mixAmount = 1.0f) {
-        if (mixAmount <= 0.0001f)
-            return input;
-
-        const float absInput = std::abs(input);
-
-        // TMT: разброс порога клиппинга
-        const float thresholdShift = tolerances ? tolerances->clipperThreshold : 0.0f;
-        
-        const float ceiling = juce::jlimit(0.90f, 0.999f, 0.988f + (thresholdShift * 0.01f));
-        const float knee = ceiling * 0.65f;
-
-        float output = input;
-
-        if (absInput > knee) {
-            const float sign = input >= 0.0f ? 1.0f : -1.0f;
-            const float excess = absInput - knee;
-            const float range = ceiling - knee;
-            
-            const float compressed = range * fast_tanh((excess / range) * TapesDSP::harmonicDistortionTrim);
-            output = sign * (knee + compressed);
-
-            transformerFlux += (output - transformerFlux) * 0.15f;
-            output += transformerFlux * 0.015f * TapesDSP::harmonicDistortionTrim * sign;
-            clippingEnvelope += (1.0f - clippingEnvelope) * 0.05f;
-        } else {
-            transformerFlux += (0.0f - transformerFlux) * 0.05f;
-            clippingEnvelope += (0.0f - clippingEnvelope) * 0.002f;
-        }
-
-        const float shelfOut = static_cast<float>(outputShelf.processSample(static_cast<double>(output)));
-        
-        if (clippingEnvelope > 0.0001f) {
-            output = output + clippingEnvelope * (shelfOut - output);
-        }
-        
-        const float processed = juce::jlimit(-ceiling, ceiling, output);
-
-        return input + (processed - input) * mixAmount;
-    }
-
-private:
-    void applyToleranceFilterCoefficients() {
-        const float lpfVar = tolerances ? tolerances->outputTransformerLPF : 1.0f;
-        // Сглаживание ВЧ при клиппинге (-1.5 дБ на 14 кГц)
-        outputShelf.setHighShelf(14000.0 * static_cast<double>(lpfVar), 0.707,
-                                 juce::Decibels::decibelsToGain(-1.5));
-    }
-
-    double sr = 44100.0;
-    float transformerFlux = 0.0f;
-    float clippingEnvelope = 0.0f;
-    const ToleranceModel::ComponentTolerances* tolerances = nullptr;
-    FastBiquad outputShelf;
 };
 
 struct WowFlutterModulation

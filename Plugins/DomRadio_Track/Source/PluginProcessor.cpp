@@ -234,8 +234,6 @@ void DomRadioTrackAudioProcessor::prepareToPlay (double sampleRate, int samplesP
     wetChainL.prepare(osRate, osMaxBlock);
     wetChainR.prepare(osRate, osMaxBlock);
 
-    clipL.prepare(sampleRate);
-    clipR.prepare(sampleRate);
     finalDcBlockL.prepare(sampleRate);
     finalDcBlockR.prepare(sampleRate);
     noiseDecayFilterL.prepare(sampleRate);
@@ -504,7 +502,7 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
         tapeBias = sign * shaped * 1.15f;
     }
 
-    const float detAmount = detailAmountParam->load() / 100.0f * mixAmount;
+    const float detAmountRaw = detailAmountParam->load() / 100.0f;
     const float detTilt = detailTiltParam->load() / 100.0f;
     const auto detAlgo = static_cast<TroakarDSP::ExtractorAlgorithm>(detailAlgoParam->load());
 
@@ -635,7 +633,7 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
             wet = chain.eq.processPost(wet);
             wet = chain.emphasis.processPost(wet);
             wet = chain.pultec.process(wet);
-            wet = chain.detailExtractor.process(wet, detAmount, detTilt, detAlgo);
+            wet = chain.detailExtractor.process(wet, detAmountRaw, detTilt, detAlgo, mixAmount);
 
             return wet * finalPostGain;
         };
@@ -728,12 +726,12 @@ void DomRadioTrackAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
             }
         }
 
-        wetL[i] = finalDcBlockL.process(clipL.process(finalL * currentOutput, mixAmount));
+        wetL[i] = finalDcBlockL.process(finalL * currentOutput);
         const float absL = std::abs(wetL[i]);
         vuEnvL += (absL > vuEnvL ? meterAttackCoeff : meterReleaseCoeff) * (absL - vuEnvL);
 
         if (wetR != nullptr) {
-            wetR[i] = finalDcBlockR.process(clipR.process(finalR * currentOutput, mixAmount));
+            wetR[i] = finalDcBlockR.process(finalR * currentOutput);
             const float absR = std::abs(wetR[i]);
             vuEnvR += (absR > vuEnvR ? meterAttackCoeff : meterReleaseCoeff) * (absR - vuEnvR);
         }

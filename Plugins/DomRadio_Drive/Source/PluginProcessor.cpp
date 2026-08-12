@@ -76,10 +76,6 @@ void DomRadioDriveAudioProcessor::prepareToPlay (double sampleRate, int samplesP
     spiralL.setTolerances(&toleranceModel.getTolerancesL());
     spiralR.setTolerances(&toleranceModel.getTolerancesR());
 
-    clipL.prepare(sampleRate); clipR.prepare(sampleRate);
-    clipL.setTolerances(&toleranceModel.getTolerancesL());
-    clipR.setTolerances(&toleranceModel.getTolerancesR());
-
     dcBlockL.prepare(sampleRate); dcBlockR.prepare(sampleRate);
     dcBlockL.reset(); dcBlockR.reset();
 
@@ -190,10 +186,10 @@ void DomRadioDriveAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
         const float currentOut = outLvlSmoothed.getNextValue();
 
         // Клиппер тоже поддерживает Smart-Mix, DC Blocker чистит результат
-        wetL_ptr[i] = dcBlockL.process(clipL.process(wetL_ptr[i] * currentOut, currentMix));
+        wetL_ptr[i] = dcBlockL.process(wetL_ptr[i] * currentOut);
 
         if (wetR_ptr) {
-            wetR_ptr[i] = dcBlockR.process(clipR.process(wetR_ptr[i] * currentOut, currentMix));
+            wetR_ptr[i] = dcBlockR.process(wetR_ptr[i] * currentOut);
         }
     }
 }

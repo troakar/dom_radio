@@ -42,7 +42,6 @@ private:
 
     TroakarDSP::InputTransformer transL, transR;
     TroakarDSP::Spiral2Core spiralL, spiralR;
-    TroakarDSP::TransformerClipper clipL, clipR;
     TroakarDSP::DCBlocker dcBlockL, dcBlockR;
 
     TroakarDSP::ToleranceModel toleranceModel;

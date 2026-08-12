@@ -2,6 +2,7 @@
 build/
 build_win/
 build_mac/
+build_new/
 cmake-build-*/
 out/
 

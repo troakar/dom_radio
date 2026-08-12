@@ -400,8 +400,8 @@ public:
         lowEnvelope += (lowLevel * formatSensitivity > lowEnvelope ? attackCoeff : releaseCoeff) * (lowLevel * formatSensitivity - lowEnvelope);
         highEnvelope += (highLevel * formatSensitivity > highEnvelope ? attackCoeff : releaseCoeff) * (highLevel * formatSensitivity - highEnvelope);
 
-        const float tapeNorm = juce::jlimit(0.0f, 1.0f, tapeDriveNorm);
-        const float pressure = juce::jlimit(0.65f, 2.20f, tapePressure);
+        const float tapeNorm = juce::jlimit(0.0f, 1.0f, tapeDriveNorm * mixAmount);
+        const float pressure = juce::jlimit(0.65f, 2.20f, 1.0f + (tapePressure - 1.0f) * mixAmount);
         const float tapeLoad = juce::jlimit(0.0f, 1.0f, tapeNorm * pressure);
         const float normalizedFullLevel = juce::jlimit(0.0f, 1.0f, fullEnvelope * 2.0f);
         const float normalizedLowLevel = juce::jlimit(0.0f, 1.0f, lowEnvelope * 2.0f);
@@ -432,25 +432,23 @@ public:
 
         const float loadReduction = 1.0f / (1.0f + lowLoad * 0.025f + glueLoad * 0.060f);
 
-        // Масштабируем мейкап и гармоники через MIX
-        const float loadMakeup = 1.0f + tapeLoad * 0.085f * mixAmount;
+        const float loadMakeup = 1.0f + tapeLoad * 0.085f;
 
         output *= loadReduction * loadMakeup;
 
         const float x = output;
         const float x2 = x * x;
 
-        output += profile.oddHarmonics * x2 * x * tapeLoad * 0.55f * TapesDSP::harmonicDistortionTrim * mixAmount;
-        output += profile.evenHarmonics * x2 * tapeLoad * 0.45f * TapesDSP::harmonicDistortionTrim * (x >= 0.0f ? 1.0f : -1.0f) * mixAmount;
+        output += profile.oddHarmonics * x2 * x * tapeLoad * 0.55f * TapesDSP::harmonicDistortionTrim;
+        output += profile.evenHarmonics * x2 * tapeLoad * 0.45f * TapesDSP::harmonicDistortionTrim * (x >= 0.0f ? 1.0f : -1.0f);
 
         if (profile.grainTextureNoise > 0.0001f && tapeLoad > 0.01f)
         {
             const float noiseRaw = rng.nextFloat() * 2.0f - 1.0f;
-            output += output * noiseRaw * profile.grainTextureNoise * tapeLoad * 0.06f * mixAmount;
+            output += output * noiseRaw * profile.grainTextureNoise * tapeLoad * 0.06f;
         }
 
-        // Бленд чистого сигнала и сатурированного для безопасной фазы
-        return input + (dynamicHighShelf.processSample(output) - input) * mixAmount;
+        return dynamicHighShelf.processSample(output);
     }
 
 private:

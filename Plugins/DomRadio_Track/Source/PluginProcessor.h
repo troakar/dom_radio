@@ -113,7 +113,6 @@ private:
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
     int activeOversamplingIndex = -1;
 
-    TroakarDSP::TransformerClipper clipL, clipR;
     TroakarDSP::DCBlocker finalDcBlockL, finalDcBlockR;
     TroakarDSP::FastBiquad noiseDecayFilterL, noiseDecayFilterR;
     

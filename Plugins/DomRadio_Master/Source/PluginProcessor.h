@@ -146,7 +146,6 @@ private:
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
     int activeOversamplingIndex = -1;
 
-    TroakarDSP::TransformerClipper clipL, clipR;
     TroakarDSP::TapeMechanics mechL, mechR;
     TroakarDSP::OxideDropouts dropouts;
     TroakarDSP::WowFlutterGenerator wowGenL, wowGenR;
