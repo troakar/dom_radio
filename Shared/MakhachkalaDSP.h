@@ -1330,61 +1330,80 @@ public:
     void prepare(double newSampleRate) {
         sampleRate = newSampleRate;
         currentGainL = currentGainR = targetGainL = targetGainR = 1.0f;
-        samplesUntilNextDropout = 0;
+        samplesUntilNextDropout = 0.0;
         dropoutSamplesRemaining = 0;
         clusterRemaining = 0;
+        currentEventsPerMinute = 0.0f;
     }
 
     forcedinline void process(float& inputL, float& inputR, float oxideAmount, float age) {
         const float oxideNorm = juce::jlimit(0.0f, 1.0f, oxideAmount / 10.0f);
         const float ageNorm = juce::jlimit(0.0f, 1.0f, age / 50.0f);
-        
-        if (oxideNorm <= 0.0f) { 
-            currentGainL += (1.0f - currentGainL) * 0.01f; 
-            currentGainR += (1.0f - currentGainR) * 0.01f; 
-            inputL *= currentGainL;
-            inputR *= currentGainR;
-            return; 
+
+        const float oxideCurve = std::pow(oxideNorm, 2.8f);
+
+        if (oxideNorm <= 0.001f || oxideCurve <= 0.0001f) { 
+            samplesUntilNextDropout = 0.0;
+            dropoutSamplesRemaining = 0;
+            clusterRemaining = 0;
+            currentEventsPerMinute = 0.0f;
+            targetGainL = 1.0f;
+            targetGainR = 1.0f;
+        } else {
+            const float ageMultiplier = 1.0f + ageNorm * 1.5f;
+
+            const float newEventsPerMinute = 50.0f * oxideCurve * ageMultiplier;
+
+            if (std::abs(newEventsPerMinute - currentEventsPerMinute) > 0.01f) {
+                if (currentEventsPerMinute > 0.001f && newEventsPerMinute > 0.001f && clusterRemaining == 0) {
+                    double ratio = static_cast<double>(currentEventsPerMinute) / static_cast<double>(newEventsPerMinute);
+                    samplesUntilNextDropout *= ratio;
+                }
+                currentEventsPerMinute = newEventsPerMinute;
+            }
+
+            if (samplesUntilNextDropout <= 0.0 && dropoutSamplesRemaining <= 0) {
+                if (clusterRemaining > 0) {
+                    samplesUntilNextDropout = static_cast<double>(randomFloat(rng, 0.01f, 0.08f) * sampleRate);
+                } else {
+                    if (rng.nextFloat() < (0.20f + ageNorm * 0.40f))
+                        clusterRemaining = static_cast<int>(randomFloat(rng, 1.0f, 2.0f + ageNorm * 3.0f));
+                    
+                    const double interval = newEventsPerMinute > 0.0f
+                        ? (60.0 * sampleRate / static_cast<double>(newEventsPerMinute)) : 1.0e9;
+                    
+                    samplesUntilNextDropout = static_cast<double>(randomFloat(rng, 0.15f, 1.1f)) * interval;
+                }
+            }
+            
+            if (samplesUntilNextDropout > 0.0) {
+                samplesUntilNextDropout -= 1.0;
+            }
+            
+            if (samplesUntilNextDropout <= 0.0 && dropoutSamplesRemaining <= 0) {
+                const float maxDurationSec = 0.015f + (0.12f * oxideCurve) * (1.0f + ageNorm * 0.8f);
+                const int duration = static_cast<int>(randomFloat(rng, 0.008f, maxDurationSec) * sampleRate);
+                dropoutSamplesRemaining = juce::jmax(1, duration);
+                
+                const float maxDepthDb = (4.0f + 20.0f * oxideCurve) * (1.0f + ageNorm * 0.4f);
+                const float baseDepthDb = randomFloat(rng, 2.0f, maxDepthDb);
+                const float lrBias = randomFloat(rng, -1.5f, 1.5f);
+                
+                targetGainL = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb + lrBias));
+                targetGainR = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb - lrBias));
+                
+                if (clusterRemaining > 0) --clusterRemaining;
+            }
+            
+            if (dropoutSamplesRemaining > 0) {
+                --dropoutSamplesRemaining;
+                if (dropoutSamplesRemaining == 0) {
+                    targetGainL = 1.0f;
+                    targetGainR = 1.0f;
+                }
+            } 
         }
 
-        if (samplesUntilNextDropout <= 0 && dropoutSamplesRemaining <= 0) {
-            if (clusterRemaining > 0) {
-                samplesUntilNextDropout = static_cast<int>(randomFloat(rng, 0.02f, 0.1f) * sampleRate);
-            } else {
-                if (rng.nextFloat() < 0.35f)
-                    clusterRemaining = static_cast<int>(randomFloat(rng, 1.0f, 3.0f));
-                
-                const float eventsPerMinute = 15.0f * oxideNorm + 45.0f * oxideNorm * oxideNorm * (1.0f + ageNorm * 1.5f);
-                const float interval = eventsPerMinute > 0.0f
-                    ? (60.0f * static_cast<float>(sampleRate) / eventsPerMinute) : 1.0e9f;
-                
-                samplesUntilNextDropout = static_cast<int>(randomFloat(rng, 0.2f, 1.2f) * interval);
-            }
-        }
-        
-        if (samplesUntilNextDropout > 0) --samplesUntilNextDropout;
-        
-        if (samplesUntilNextDropout == 0 && dropoutSamplesRemaining <= 0) {
-            const int duration = static_cast<int>(randomFloat(rng, 0.01f, 0.15f) * sampleRate);
-            dropoutSamplesRemaining = juce::jmax(1, duration);
-            
-            const float baseDepthDb = randomFloat(rng, 3.0f, 12.0f) * oxideNorm * (1.0f + 1.2f * ageNorm);
-            const float lrBias = randomFloat(rng, -1.0f, 1.0f);
-            
-            targetGainL = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb + lrBias));
-            targetGainR = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb - lrBias));
-            
-            if (clusterRemaining > 0) --clusterRemaining;
-        }
-        
-        if (dropoutSamplesRemaining > 0) {
-            --dropoutSamplesRemaining;
-            if (dropoutSamplesRemaining == 0) {
-                targetGainL = 1.0f;
-                targetGainR = 1.0f;
-            }
-        } 
-        
         const float coeffL = (targetGainL < currentGainL) ? 0.08f : 0.008f;
         const float coeffR = (targetGainR < currentGainR) ? 0.08f : 0.008f;
         
@@ -1403,8 +1422,10 @@ public:
 private:
     float currentGainL = 1.0f, currentGainR = 1.0f;
     float targetGainL = 1.0f, targetGainR = 1.0f;
-    int samplesUntilNextDropout = 0, dropoutSamplesRemaining = 0;
+    double samplesUntilNextDropout = 0.0;
+    int dropoutSamplesRemaining = 0;
     int clusterRemaining = 0;
+    float currentEventsPerMinute = 0.0f;
     double sampleRate = 44100.0;
     FastRandom rng { 2026 };
 };

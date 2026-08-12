@@ -746,7 +746,6 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
     const float ageNorm = juce::jlimit(0.0f, 1.0f, currentAgeForScrape / 50.0f);
     float wearAmount = ageNorm * ageNorm * (3.0f - 2.0f * ageNorm);
-    float macroDropouts = (ageNorm > 0.35f) ? std::pow((ageNorm - 0.35f) / 0.65f, 2.0f) * 10.0f : 0.0f;
     float macroAzimuth = ageNorm * ageNorm * 10.0f;
     float macroCrosstalk = ageNorm + std::pow(ageNorm, 4.0f) * 2.0f;
     juce::ignoreUnused(macroAzimuth, macroCrosstalk);
@@ -946,7 +945,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
         crosstalk.process(blendedL, blendedR, effCrosstalk, currentAgeForScrape);
 
-        dropouts.process(blendedL, blendedR, (effOxide + macroDropouts) * thermal.dropoutMult, currentAgeForScrape);
+        dropouts.process(blendedL, blendedR, effOxide * thermal.dropoutMult, currentAgeForScrape);
         displayDropoutLeft.store(dropouts.getCurrentGainL(), std::memory_order_relaxed);
         displayDropoutRight.store(dropouts.getCurrentGainR(), std::memory_order_relaxed);
 
