@@ -458,8 +458,6 @@ public:
         biasMidPeak.prepare(sampleRate);
         biasHighShelf.prepare(sampleRate);
         archiveCompensationPeak.prepare(sampleRate);
-        archiveCompensationBody.prepare(sampleRate);
-        archiveCompensationDip.prepare(sampleRate);
 preEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sampleRate, 1000.0, 0.707, 1.0);
 deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sampleRate, 1000.0, 0.707, 1.0);
         headBumpPrimary.coefficients = juce::dsp::IIR::Coefficients<double>::makeAllPass(sampleRate, 1000.0);
@@ -506,8 +504,6 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
         biasMidPeak.reset();
         biasHighShelf.reset();
         archiveCompensationPeak.reset();
-        archiveCompensationBody.reset();
-        archiveCompensationDip.reset();
     }
 
     TapeCurve getTapeCurve(float speedNorm, int eqMode) const noexcept
@@ -674,33 +670,18 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
             gapLoss.setLowPass(currentGapFreq, 0.707f);
             lastAppliedGapFreq = currentGapFreq;
 
-            // === ARCHIVE COMPENSATORY RIPPLE CASCADE (Mechlabor / Studer Style) ===
-            const float wearThreshold = 0.15f;
-            float activeWear = 0.0f;
+            // === ARCHIVE COMPENSATORY PEAK (Mechlabor style) ===
+            const float wearThreshold = 0.2f;
+            float peakGainDb = 0.0f;
             if (ageNorm > wearThreshold) {
-                activeWear = (ageNorm - wearThreshold) / (1.0f - wearThreshold);
+                float activeWear = (ageNorm - wearThreshold) / (1.0f - wearThreshold);
+                peakGainDb = activeWear * activeWear * 14.0f;
             }
 
-            const float wearShape = activeWear * activeWear;
-
-            // 1. Основной острый пик износа зазора
-            const float peakFreq = 14000.0f - (activeWear * 8000.0f);
-            const float peakQ = 1.2f + activeWear * 2.3f;
-            const float peakGainDb = wearShape * 11.0f;
-
-            // 2. Широкая "подушка" снизу (широкий белл большей площади)
-            const float bodyFreq = peakFreq * 0.62f;
-            const float bodyQ = 0.55f + activeWear * 0.25f;
-            const float bodyGainDb = activeWear * 4.0f;
-
-            // 3. Интерференционный микро-дип сверху (создает нелинейную волну АЧХ)
-            const float dipFreq = juce::jmin(21000.0f, peakFreq * 1.45f);
-            const float dipQ = 1.8f + activeWear * 1.2f;
-            const float dipGainDb = -activeWear * 3.2f;
+            float peakFreq = 14000.0f - (ageNorm * 8000.0f);
+            float peakQ = 1.0f + ageNorm * 2.5f;
 
             archiveCompensationPeak.setPeakFilter(peakFreq, peakQ, juce::Decibels::decibelsToGain(peakGainDb * mixAmount));
-            archiveCompensationBody.setPeakFilter(bodyFreq, bodyQ, juce::Decibels::decibelsToGain(bodyGainDb * mixAmount));
-            archiveCompensationDip.setPeakFilter(dipFreq, dipQ, juce::Decibels::decibelsToGain(dipGainDb * mixAmount));
         }
     }
 
@@ -721,8 +702,6 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
         out = profileMidContour.processSample(out);
 
         out = archiveCompensationPeak.processSample(out);
-        out = archiveCompensationBody.processSample(out);
-        out = archiveCompensationDip.processSample(out);
 
         if (biasFiltersActive) {
             out = biasLowShelf.processSample(out);
@@ -767,9 +746,7 @@ deEmphasis.coefficients = juce::dsp::IIR::Coefficients<double>::makeHighShelf(sa
                           * headBumpSecondary.coefficients->getMagnitudeForFrequency(freq, sr);
         const double gap = gapLoss.getMagnitudeForFrequency(freq);
         const double contour = profileMidContour.getMagnitudeForFrequency(freq);
-        const double archiveComp = archiveCompensationPeak.getMagnitudeForFrequency(freq)
-                                  * archiveCompensationBody.getMagnitudeForFrequency(freq)
-                                  * archiveCompensationDip.getMagnitudeForFrequency(freq);
+        const double archiveComp = archiveCompensationPeak.getMagnitudeForFrequency(freq);
         double biasResponse = 1.0;
         if (biasFiltersActive) {
             biasResponse = biasLowShelf.getMagnitudeForFrequency(freq)
@@ -846,8 +823,6 @@ private:
     juce::dsp::IIR::Filter<double> headBumpDip;
     juce::dsp::IIR::Filter<double> headBumpSecondary;
     FastBiquad archiveCompensationPeak;
-    FastBiquad archiveCompensationBody;
-    FastBiquad archiveCompensationDip;
     const ToleranceModel::ComponentTolerances* tolerances = nullptr;
 };
 
@@ -1330,80 +1305,61 @@ public:
     void prepare(double newSampleRate) {
         sampleRate = newSampleRate;
         currentGainL = currentGainR = targetGainL = targetGainR = 1.0f;
-        samplesUntilNextDropout = 0.0;
+        samplesUntilNextDropout = 0;
         dropoutSamplesRemaining = 0;
         clusterRemaining = 0;
-        currentEventsPerMinute = 0.0f;
     }
 
     forcedinline void process(float& inputL, float& inputR, float oxideAmount, float age) {
         const float oxideNorm = juce::jlimit(0.0f, 1.0f, oxideAmount / 10.0f);
         const float ageNorm = juce::jlimit(0.0f, 1.0f, age / 50.0f);
-
-        const float oxideCurve = std::pow(oxideNorm, 2.8f);
-
-        if (oxideNorm <= 0.001f || oxideCurve <= 0.0001f) { 
-            samplesUntilNextDropout = 0.0;
-            dropoutSamplesRemaining = 0;
-            clusterRemaining = 0;
-            currentEventsPerMinute = 0.0f;
-            targetGainL = 1.0f;
-            targetGainR = 1.0f;
-        } else {
-            const float ageMultiplier = 1.0f + ageNorm * 1.5f;
-
-            const float newEventsPerMinute = 50.0f * oxideCurve * ageMultiplier;
-
-            if (std::abs(newEventsPerMinute - currentEventsPerMinute) > 0.01f) {
-                if (currentEventsPerMinute > 0.001f && newEventsPerMinute > 0.001f && clusterRemaining == 0) {
-                    double ratio = static_cast<double>(currentEventsPerMinute) / static_cast<double>(newEventsPerMinute);
-                    samplesUntilNextDropout *= ratio;
-                }
-                currentEventsPerMinute = newEventsPerMinute;
-            }
-
-            if (samplesUntilNextDropout <= 0.0 && dropoutSamplesRemaining <= 0) {
-                if (clusterRemaining > 0) {
-                    samplesUntilNextDropout = static_cast<double>(randomFloat(rng, 0.01f, 0.08f) * sampleRate);
-                } else {
-                    if (rng.nextFloat() < (0.20f + ageNorm * 0.40f))
-                        clusterRemaining = static_cast<int>(randomFloat(rng, 1.0f, 2.0f + ageNorm * 3.0f));
-                    
-                    const double interval = newEventsPerMinute > 0.0f
-                        ? (60.0 * sampleRate / static_cast<double>(newEventsPerMinute)) : 1.0e9;
-                    
-                    samplesUntilNextDropout = static_cast<double>(randomFloat(rng, 0.15f, 1.1f)) * interval;
-                }
-            }
-            
-            if (samplesUntilNextDropout > 0.0) {
-                samplesUntilNextDropout -= 1.0;
-            }
-            
-            if (samplesUntilNextDropout <= 0.0 && dropoutSamplesRemaining <= 0) {
-                const float maxDurationSec = 0.015f + (0.12f * oxideCurve) * (1.0f + ageNorm * 0.8f);
-                const int duration = static_cast<int>(randomFloat(rng, 0.008f, maxDurationSec) * sampleRate);
-                dropoutSamplesRemaining = juce::jmax(1, duration);
-                
-                const float maxDepthDb = (4.0f + 20.0f * oxideCurve) * (1.0f + ageNorm * 0.4f);
-                const float baseDepthDb = randomFloat(rng, 2.0f, maxDepthDb);
-                const float lrBias = randomFloat(rng, -1.5f, 1.5f);
-                
-                targetGainL = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb + lrBias));
-                targetGainR = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb - lrBias));
-                
-                if (clusterRemaining > 0) --clusterRemaining;
-            }
-            
-            if (dropoutSamplesRemaining > 0) {
-                --dropoutSamplesRemaining;
-                if (dropoutSamplesRemaining == 0) {
-                    targetGainL = 1.0f;
-                    targetGainR = 1.0f;
-                }
-            } 
+        
+        if (oxideNorm <= 0.0f) { 
+            currentGainL += (1.0f - currentGainL) * 0.01f; 
+            currentGainR += (1.0f - currentGainR) * 0.01f; 
+            inputL *= currentGainL;
+            inputR *= currentGainR;
+            return; 
         }
 
+        if (samplesUntilNextDropout <= 0 && dropoutSamplesRemaining <= 0) {
+            if (clusterRemaining > 0) {
+                samplesUntilNextDropout = static_cast<int>(randomFloat(rng, 0.02f, 0.1f) * sampleRate);
+            } else {
+                if (rng.nextFloat() < 0.35f)
+                    clusterRemaining = static_cast<int>(randomFloat(rng, 1.0f, 3.0f));
+                
+                const float eventsPerMinute = 15.0f * oxideNorm + 45.0f * oxideNorm * oxideNorm * (1.0f + ageNorm * 1.5f);
+                const float interval = eventsPerMinute > 0.0f
+                    ? (60.0f * static_cast<float>(sampleRate) / eventsPerMinute) : 1.0e9f;
+                
+                samplesUntilNextDropout = static_cast<int>(randomFloat(rng, 0.2f, 1.2f) * interval);
+            }
+        }
+        
+        if (samplesUntilNextDropout > 0) --samplesUntilNextDropout;
+        
+        if (samplesUntilNextDropout == 0 && dropoutSamplesRemaining <= 0) {
+            const int duration = static_cast<int>(randomFloat(rng, 0.01f, 0.15f) * sampleRate);
+            dropoutSamplesRemaining = juce::jmax(1, duration);
+            
+            const float baseDepthDb = randomFloat(rng, 3.0f, 12.0f) * oxideNorm * (1.0f + 1.2f * ageNorm);
+            const float lrBias = randomFloat(rng, -1.0f, 1.0f);
+            
+            targetGainL = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb + lrBias));
+            targetGainR = juce::Decibels::decibelsToGain(-juce::jmax(0.0f, baseDepthDb - lrBias));
+            
+            if (clusterRemaining > 0) --clusterRemaining;
+        }
+        
+        if (dropoutSamplesRemaining > 0) {
+            --dropoutSamplesRemaining;
+            if (dropoutSamplesRemaining == 0) {
+                targetGainL = 1.0f;
+                targetGainR = 1.0f;
+            }
+        } 
+        
         const float coeffL = (targetGainL < currentGainL) ? 0.08f : 0.008f;
         const float coeffR = (targetGainR < currentGainR) ? 0.08f : 0.008f;
         
@@ -1422,13 +1378,12 @@ public:
 private:
     float currentGainL = 1.0f, currentGainR = 1.0f;
     float targetGainL = 1.0f, targetGainR = 1.0f;
-    double samplesUntilNextDropout = 0.0;
-    int dropoutSamplesRemaining = 0;
+    int samplesUntilNextDropout = 0, dropoutSamplesRemaining = 0;
     int clusterRemaining = 0;
-    float currentEventsPerMinute = 0.0f;
     double sampleRate = 44100.0;
     FastRandom rng { 2026 };
 };
+
 
 class DCBlocker {
 public:
@@ -1528,7 +1483,7 @@ public:
         }
         
         dynAttack = 1.0f - std::exp(-1.0f / (0.010f * static_cast<float>(sr)));
-        dynRelease = 1.0f - std::exp(-1.0f / (0.350f * static_cast<float>(sr)));
+        dynRelease = 1.0f - std::exp(-1.0f / (0.150f * static_cast<float>(sr)));
         
         reset();
     }
@@ -1600,7 +1555,7 @@ public:
 
         const float absIn = std::abs(input);
         const float attackCoeff = 1.0f - std::exp(-1.0f / (0.006f * static_cast<float>(sr)));
-        const float releaseCoeff = 1.0f - std::exp(-1.0f / (0.350f * static_cast<float>(sr)));
+        const float releaseCoeff = 1.0f - std::exp(-1.0f / (0.150f * static_cast<float>(sr)));
         env += (absIn > env ? attackCoeff : releaseCoeff) * (absIn - env);
 
         const float crackleProb = 0.00012f + ageNorm * 0.00020f + humFactor * 0.00008f;
