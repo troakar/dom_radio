@@ -8,25 +8,27 @@ public:
                 const juce::String& paramID, const juce::String& labelText)
     {
         slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        slider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 18);
         slider.setPopupDisplayEnabled(true, true, nullptr);
         addAndMakeVisible(slider);
-
+        
         label.setText(labelText, juce::dontSendNotification);
         label.setJustificationType(juce::Justification::centred);
-        label.setColour(juce::Label::textColourId, juce::Colour::fromRGB(30, 30, 30));
+        label.setFont(juce::Font(12.0f, juce::Font::bold));
+        label.setColour(juce::Label::textColourId, juce::Colour::fromRGB(180, 175, 160));
         label.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
         addAndMakeVisible(label);
 
         attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             apvts, paramID, slider);
     }
-
+    
     void resized() override
     {
-        auto b = getLocalBounds();
-        label.setBounds(b.removeFromTop(14));
-        slider.setBounds(b);
+        auto bounds = getLocalBounds();
+        label.setBounds(bounds.removeFromTop(18));
+        bounds.removeFromTop(5);
+        slider.setBounds(bounds);
     }
 
     juce::Slider slider;

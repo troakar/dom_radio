@@ -164,39 +164,77 @@ void DomRadioLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int 
 }
 
 void DomRadioLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
-                                           float sliderPos, float, float,
-                                           const juce::Slider::SliderStyle, juce::Slider&)
+                                           float sliderPos, float minSliderPos, float maxSliderPos,
+                                           const juce::Slider::SliderStyle style, juce::Slider& slider)
 {
-    auto trackBounds = juce::Rectangle<float>((float)x, (float)y + (float)height * 0.35f, (float)width, (float)height * 0.30f);
+    bool isVertical = (style == juce::Slider::LinearVertical || style == juce::Slider::LinearBarVertical);
 
-    g.setColour(juce::Colour::fromRGB(130, 125, 115));
-    g.drawRoundedRectangle(trackBounds.expanded(1.0f), 3.0f, 1.0f);
+    if (isVertical)
+    {
+        auto trackBounds = juce::Rectangle<float>((float)x + (float)width * 0.35f, (float)y, (float)width * 0.30f, (float)height);
 
-    juce::ColourGradient grad(
-        juce::Colour::fromRGB(50, 130, 210), trackBounds.getX(), trackBounds.getCentreY(),
-        juce::Colour::fromRGB(220, 40, 20), trackBounds.getRight(), trackBounds.getCentreY(), false);
-    grad.addColour(0.5, juce::Colour::fromRGB(235, 195, 75));
+        g.setColour(juce::Colour::fromRGB(130, 125, 115));
+        g.drawRoundedRectangle(trackBounds.expanded(1.0f), 3.0f, 1.0f);
 
-    g.setGradientFill(grad);
-    g.fillRoundedRectangle(trackBounds, 2.0f);
+        juce::ColourGradient grad(
+            juce::Colour::fromRGB(220, 40, 20), trackBounds.getCentreX(), trackBounds.getY(),
+            juce::Colour::fromRGB(50, 130, 210), trackBounds.getCentreX(), trackBounds.getBottom(), false);
+        grad.addColour(0.5, juce::Colour::fromRGB(235, 195, 75));
 
-    float thumbW = 16.0f;
-    float thumbH = (float)height * 0.85f;
-    auto thumbRect = juce::Rectangle<float>(sliderPos - thumbW * 0.5f, (float)y + ((float)height - thumbH) * 0.5f, thumbW, thumbH);
+        g.setGradientFill(grad);
+        g.fillRoundedRectangle(trackBounds, 2.0f);
 
-    g.setColour(juce::Colours::black.withAlpha(0.35f));
-    g.fillRoundedRectangle(thumbRect.translated(1.0f, 2.0f), 2.0f);
+        float thumbH = 16.0f;
+        float thumbW = (float)width * 0.85f;
+        auto thumbRect = juce::Rectangle<float>((float)x + ((float)width - thumbW) * 0.5f, sliderPos - thumbH * 0.5f, thumbW, thumbH);
 
-    juce::ColourGradient thumbGrad(juce::Colour::fromRGB(85, 85, 85), thumbRect.getX(), thumbRect.getY(),
-                                   juce::Colour::fromRGB(25, 25, 25), thumbRect.getX(), thumbRect.getBottom(), false);
-    g.setGradientFill(thumbGrad);
-    g.fillRoundedRectangle(thumbRect, 2.0f);
+        g.setColour(juce::Colours::black.withAlpha(0.35f));
+        g.fillRoundedRectangle(thumbRect.translated(2.0f, 1.0f), 2.0f);
 
-    g.setColour(juce::Colour::fromRGB(230, 140, 30));
-    g.fillRect(thumbRect.getCentreX() - 1.0f, thumbRect.getY() + 3.0f, 2.0f, thumbRect.getHeight() - 6.0f);
+        juce::ColourGradient thumbGrad(juce::Colour::fromRGB(85, 85, 85), thumbRect.getX(), thumbRect.getY(),
+                                       juce::Colour::fromRGB(25, 25, 25), thumbRect.getRight(), thumbRect.getY(), false);
+        g.setGradientFill(thumbGrad);
+        g.fillRoundedRectangle(thumbRect, 2.0f);
 
-    g.setColour(juce::Colour::fromRGB(20, 20, 20));
-    g.drawRoundedRectangle(thumbRect, 2.0f, 1.0f);
+        g.setColour(juce::Colour::fromRGB(230, 140, 30));
+        g.fillRect(thumbRect.getX() + 3.0f, thumbRect.getCentreY() - 1.0f, thumbRect.getWidth() - 6.0f, 2.0f);
+
+        g.setColour(juce::Colour::fromRGB(20, 20, 20));
+        g.drawRoundedRectangle(thumbRect, 2.0f, 1.0f);
+    }
+    else
+    {
+        auto trackBounds = juce::Rectangle<float>((float)x, (float)y + (float)height * 0.35f, (float)width, (float)height * 0.30f);
+
+        g.setColour(juce::Colour::fromRGB(130, 125, 115));
+        g.drawRoundedRectangle(trackBounds.expanded(1.0f), 3.0f, 1.0f);
+
+        juce::ColourGradient grad(
+            juce::Colour::fromRGB(50, 130, 210), trackBounds.getX(), trackBounds.getCentreY(),
+            juce::Colour::fromRGB(220, 40, 20), trackBounds.getRight(), trackBounds.getCentreY(), false);
+        grad.addColour(0.5, juce::Colour::fromRGB(235, 195, 75));
+
+        g.setGradientFill(grad);
+        g.fillRoundedRectangle(trackBounds, 2.0f);
+
+        float thumbW = 16.0f;
+        float thumbH = (float)height * 0.85f;
+        auto thumbRect = juce::Rectangle<float>(sliderPos - thumbW * 0.5f, (float)y + ((float)height - thumbH) * 0.5f, thumbW, thumbH);
+
+        g.setColour(juce::Colours::black.withAlpha(0.35f));
+        g.fillRoundedRectangle(thumbRect.translated(1.0f, 2.0f), 2.0f);
+
+        juce::ColourGradient thumbGrad(juce::Colour::fromRGB(85, 85, 85), thumbRect.getX(), thumbRect.getY(),
+                                       juce::Colour::fromRGB(25, 25, 25), thumbRect.getX(), thumbRect.getBottom(), false);
+        g.setGradientFill(thumbGrad);
+        g.fillRoundedRectangle(thumbRect, 2.0f);
+
+        g.setColour(juce::Colour::fromRGB(230, 140, 30));
+        g.fillRect(thumbRect.getCentreX() - 1.0f, thumbRect.getY() + 3.0f, 2.0f, thumbRect.getHeight() - 6.0f);
+
+        g.setColour(juce::Colour::fromRGB(20, 20, 20));
+        g.drawRoundedRectangle(thumbRect, 2.0f, 1.0f);
+    }
 }
 
 void DomRadioLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height, bool, int, int, int, int, juce::ComboBox& box)
