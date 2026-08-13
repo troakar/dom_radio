@@ -5,13 +5,14 @@
 class GradientFilterOverlay : public juce::Component
 {
 public:
-    GradientFilterOverlay(GradientBandManager& manager)
-        : bandManager(manager)
+    GradientFilterOverlay(GradientPointManager& manager)
+        : pointManager(manager)
     {
         setMouseCursor(juce::MouseCursor::PointingHandCursor);
     }
 
     std::function<void()> onSelectionChanged;
+    std::function<void(int)> onPointDeleted;
 
     void paint(juce::Graphics& g) override
     {
@@ -22,43 +23,55 @@ public:
         g.setColour(juce::Colour::fromRGB(45, 40, 32));
         g.drawRoundedRectangle(bounds, 4.0f, 1.0f);
 
-        int numBands = (int)bandManager.bands.size();
-        float buttonWidth = (bounds.getWidth() - 10.0f) / (numBands + 1);
+        int numPoints = (int)pointManager.points.size();
+        float buttonWidth = numPoints > 0 ? (bounds.getWidth() - 10.0f) / (numPoints + 1) : bounds.getWidth() - 10.0f;
         float h = bounds.getHeight() - 6.0f;
 
         auto globalRect = juce::Rectangle<float>(5.0f, 3.0f, buttonWidth - 4.0f, h);
-        bool isGlobalSelected = !bandManager.isBandSelected();
-        drawBadge(g, globalRect, "GLOBAL", juce::Colour::fromRGB(180, 175, 160), isGlobalSelected);
+        bool isGlobalSelected = !pointManager.hasActivePoint();
+        drawBadge(g, globalRect, "GLOBAL", juce::Colour::fromRGB(180, 175, 160), isGlobalSelected, -1);
 
-        for (int i = 0; i < numBands; ++i)
+        for (int i = 0; i < numPoints; ++i)
         {
-            auto& band = bandManager.bands[(size_t)i];
+            auto& point = pointManager.points[i];
             auto badgeRect = juce::Rectangle<float>(5.0f + (i + 1) * buttonWidth, 3.0f, buttonWidth - 4.0f, h);
-            bool isSelected = (bandManager.getSelectedBandIndex() == i);
-            drawBadge(g, badgeRect, band.name, band.color, isSelected);
+            
+            // ИЗМЕНЕНО: теперь проверяем point.isSelected вместо point.active
+            drawBadge(g, badgeRect, point.name, point.color, point.isSelected, point.id); 
         }
     }
 
     void mouseDown(const juce::MouseEvent& e) override
     {
         auto bounds = getLocalBounds().toFloat();
-        int numBands = (int)bandManager.bands.size();
-        float buttonWidth = (bounds.getWidth() - 10.0f) / (numBands + 1);
+        int numPoints = (int)pointManager.points.size();
+        float buttonWidth = numPoints > 0 ? (bounds.getWidth() - 10.0f) / (numPoints + 1) : bounds.getWidth() - 10.0f;
 
         float x = e.position.x - 5.0f;
         int clickedIndex = static_cast<int>(x / buttonWidth) - 1;
 
-        if (clickedIndex < 0 || clickedIndex >= numBands)
-            bandManager.clearSelection();
+        if (e.mods.isPopupMenu() && clickedIndex >= 0 && clickedIndex < numPoints)
+        {
+            int pointId = pointManager.points[clickedIndex].id;
+            pointManager.removePoint(pointId);
+            if (onPointDeleted) onPointDeleted(pointId);
+            repaint();
+            if (onSelectionChanged) onSelectionChanged();
+            return;
+        }
+
+        if (clickedIndex < 0 || clickedIndex >= numPoints)
+            pointManager.clearActive();
         else
-            bandManager.setSelectedBandIndex(clickedIndex);
+            pointManager.setActivePoint(pointManager.points[clickedIndex].id);
 
         repaint();
         if (onSelectionChanged) onSelectionChanged();
     }
 
 private:
-    void drawBadge(juce::Graphics& g, juce::Rectangle<float> rect, const juce::String& text, juce::Colour color, bool isSelected)
+    void drawBadge(juce::Graphics& g, juce::Rectangle<float> rect, const juce::String& text,
+                   juce::Colour color, bool isSelected, int pointId)
     {
         g.setColour(isSelected ? color.withAlpha(0.25f) : juce::Colour::fromRGB(28, 24, 20));
         g.fillRoundedRectangle(rect, 3.0f);
@@ -80,5 +93,5 @@ private:
         g.drawText(text, rect.withTrimmedLeft(16.0f), juce::Justification::centredLeft, true);
     }
 
-    GradientBandManager& bandManager;
+    GradientPointManager& pointManager;
 };

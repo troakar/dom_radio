@@ -22,7 +22,7 @@ private:
     DomRadioLookAndFeel customLookAndFeel;
     EQGraphLED eqGraph;
 
-    GradientBandManager gradientManager;
+    GradientPointManager& gradientManager;
     std::unique_ptr<GradientFilterOverlay> gradientOverlay;
 
     std::unique_ptr<GradientKnob> inGainKnob, outLvlKnob, mixKnob;
@@ -30,6 +30,7 @@ private:
 
     void updateKnobStates();
     void syncKnobsWithSelectedGradient();
+    void onGradientKnobChanged();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TroakarSpectralAudioProcessorEditor)
 };

@@ -3,10 +3,26 @@
 
 TroakarSpectralAudioProcessor::TroakarSpectralAudioProcessor()
      : AudioProcessor (BusesProperties()
-                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                       .withInput  ("Input",     juce::AudioChannelSet::stereo(), true)
+                       .withOutput ("Output",    juce::AudioChannelSet::stereo(), true)
+                       .withInput  ("Sidechain", juce::AudioChannelSet::stereo(), false)),
        apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
+    smoothedMix.setCurrentAndTargetValue(1.0f);
+}
+
+bool TroakarSpectralAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+{
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo() ||
+        layouts.getMainInputChannelSet()  != juce::AudioChannelSet::stereo())
+        return false;
+
+    if (layouts.getChannelSet(true, 1) != juce::AudioChannelSet::disabled() &&
+        layouts.getChannelSet(true, 1) != juce::AudioChannelSet::stereo() &&
+        layouts.getChannelSet(true, 1) != juce::AudioChannelSet::mono())
+        return false;
+
+    return true;
 }
 
 TroakarSpectralAudioProcessor::~TroakarSpectralAudioProcessor() {}
@@ -41,11 +57,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "AMOUNT", "Comp Amount", 
-        juce::NormalisableRange<float>(0.0f, 150.0f, 1.0f), 100.0f, 
+        juce::NormalisableRange<float>(0.0f, 150.0f, 1.0f), 0.0f, 
         FloatAttr().withStringFromValueFunction(pctFormat)));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "GLOBAL_THRESH", "EQ Threshold", 
+        "GLOBAL_THRESH", "Threshold", 
         juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f, 
         FloatAttr().withStringFromValueFunction(dbFormat)));
 
@@ -74,11 +90,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
         juce::String idPrefix = "BAND_" + juce::String(i);
         juce::String namePrefix = "Band " + juce::String(i + 1);
 
-        bool defaultEnabled = (i < 2);
-        float defaultFreq = (i == 0) ? 100.0f : (i == 1) ? 5000.0f : 1000.0f * (i + 1);
-
         params.push_back(std::make_unique<juce::AudioParameterBool>(
-            idPrefix + "_ENABLE", namePrefix + " Enabled", defaultEnabled));
+            idPrefix + "_ENABLE", namePrefix + " Enabled", false));
+        float defaultFreq = (i == 0) ? 100.0f : (i == 1) ? 5000.0f : 1000.0f * (i + 1);
         
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             idPrefix + "_FREQ", namePrefix + " Freq", 
@@ -96,12 +110,75 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
             FloatAttr().withStringFromValueFunction(qFormat)));
     }
 
+    for (int g = 0; g < 4; ++g)
+    {
+        juce::String idPrefix = "GRADIENT_" + juce::String(g);
+        juce::String namePrefix = "Gradient " + juce::String(g + 1);
+
+        params.push_back(std::make_unique<juce::AudioParameterBool>(
+            idPrefix + "_ENABLE", namePrefix + " Enabled", false));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_CENTER_FREQ", namePrefix + " Center Freq",
+            juce::NormalisableRange<float>(20.0f, 20000.0f, 0.1f, 0.25f),
+            (g == 0) ? 100.0f : (g == 1) ? 500.0f : (g == 2) ? 2500.0f : 8000.0f,
+            FloatAttr().withStringFromValueFunction(hzFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_CENTER_GAIN", namePrefix + " Center Gain (Thresh Offset)",
+            juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f,
+            FloatAttr().withStringFromValueFunction(dbFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_BANDWIDTH", namePrefix + " Bandwidth",
+            juce::NormalisableRange<float>(0.5f, 4.0f, 0.1f), 1.5f,
+            FloatAttr().withStringFromValueFunction([](float v, int) { return juce::String(v, 2) + " oct"; })));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_AMOUNT", namePrefix + " Amount",
+            juce::NormalisableRange<float>(0.0f, 150.0f, 1.0f), 100.0f,
+            FloatAttr().withStringFromValueFunction(pctFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_UP_MAX", namePrefix + " Up Max",
+            juce::NormalisableRange<float>(0.0f, 24.0f, 0.1f), 4.0f,
+            FloatAttr().withStringFromValueFunction(dbFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_DOWN_MAX", namePrefix + " Down Max",
+            juce::NormalisableRange<float>(-24.0f, 0.0f, 0.1f), -4.0f,
+            FloatAttr().withStringFromValueFunction(dbFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_SPEED", namePrefix + " Speed",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 50.0f,
+            FloatAttr().withStringFromValueFunction(pctFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_SMOOTH", namePrefix + " Smooth",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 20.0f,
+            FloatAttr().withStringFromValueFunction(pctFormat)));
+    }
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        "FFT_MODE", "FFT Size / Precision",
+        juce::StringArray { "512 (Fast / Low Latency)", "1024 (Balanced)", "2048 (Precise / Mastering)" }, 0));
+
     return { params.begin(), params.end() };
 }
 
 void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     spectralEngine.prepare(sampleRate);
+    
+    dryDelayBuffer.setSize(2, 2048);
+    dryDelayBuffer.clear();
+    dryDelayIndex = 0;
+
+    audioThreadGradients.resize(4);
+    smoothedMix.reset(sampleRate, 0.04);
+
+    setLatencySamples(currentFFTSize);
 }
 
 void TroakarSpectralAudioProcessor::releaseResources() {}
@@ -114,6 +191,17 @@ void TroakarSpectralAudioProcessor::processBlock(
     const int numSamples  = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
     if (numSamples == 0 || numChannels == 0) return;
+
+    int fftMode = static_cast<int>(*apvts.getRawParameterValue("FFT_MODE"));
+    if (fftMode != prevFFTMode)
+    {
+        prevFFTMode = fftMode;
+        currentFFTSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
+
+        spectralEngine.switchFFTSize(currentFFTSize);
+        setLatencySamples(currentFFTSize);
+        updateHostDisplay();
+    }
 
     // 1. Input gain c плавным кроссфейдом (убирает щелчки)
     float inGainDb = *apvts.getRawParameterValue("IN_GAIN");
@@ -128,37 +216,106 @@ void TroakarSpectralAudioProcessor::processBlock(
         buffer.applyGain(inGainLin);
     }
 
-    // 2. Dry copy для mix
+    // 2. Dry copy для mix (С ИДЕАЛЬНОЙ ФАЗОВОЙ КОМПЕНСАЦИЕЙ ЗАДЕРЖКИ)
     float mixPct = *apvts.getRawParameterValue("MIX");
-    const float mixWet = juce::jlimit(0.0f, 1.0f, mixPct / 100.0f);
+    smoothedMix.setTargetValue(mixPct / 100.0f);
 
-    juce::AudioBuffer<float> dryBuffer;
-    if (mixWet < 0.999f)
-        dryBuffer.makeCopyOf(buffer);
+    juce::AudioBuffer<float> delayedDryBuffer;
+    delayedDryBuffer.setSize(numChannels, numSamples, false, false, true);
+
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        const float* dryIn = buffer.getReadPointer(ch);
+        float* dryOut = delayedDryBuffer.getWritePointer(ch);
+        float* delayData = dryDelayBuffer.getWritePointer(ch);
+
+        int tempIndex = dryDelayIndex;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            dryOut[i] = delayData[tempIndex];
+            delayData[tempIndex] = dryIn[i];
+            
+            if (++tempIndex >= currentFFTSize) tempIndex = 0;
+        }
+    }
+    
+    dryDelayIndex = (dryDelayIndex + numSamples) % currentFFTSize;
 
     // 3. Spectral processing
-    spectralEngine.refreshGradientBands(gradientManager.bands, getSampleRate());
-
     float upMax   = *apvts.getRawParameterValue("UPWARD_RANGE");
     float downMax = *apvts.getRawParameterValue("DOWNWARD_RANGE");
     float amount  = *apvts.getRawParameterValue("AMOUNT");
     float speed   = *apvts.getRawParameterValue("SPECTRAL_SPEED");
     float smooth  = *apvts.getRawParameterValue("SMOOTHING");
 
-    spectralEngine.process(buffer, apvts,
-                           upMax, downMax, amount, speed, smooth,
-                           spectrumDataLeft, compressionDeltaData);
-
-    // 4. Dry/wet mix
-    if (mixWet < 0.999f)
+    // ЛЕНИВЫЕ ВЫЧИСЛЕНИЯ: Проверяем, трогал ли пользователь ручки
+    bool engineDirty = syncGradientPointsFromAPVTS();
+    if (upMax != prevUpMax || downMax != prevDownMax || amount != prevAmount || 
+        speed != prevSpeed || smooth != prevSmooth) 
     {
-        const float mixDry = 1.0f - mixWet;
-        for (int ch = 0; ch < numChannels; ++ch)
+        engineDirty = true;
+        prevUpMax = upMax; prevDownMax = downMax; prevAmount = amount;
+        prevSpeed = speed; prevSmooth = smooth;
+    }
+
+    // Если трогал — пересчитываем массивы коэффициентов
+    if (engineDirty) {
+        spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, 
+                                        audioThreadGradients, getSampleRate());
+    }
+
+    // Сигнатура process стала чище, передаем только буферы
+    auto mainBuffer = getBusBuffer(buffer, true, 0);
+    auto sidechainBuffer = getBusBuffer(buffer, true, 1);
+
+    bool hasSidechain = (getBusCount(true) > 1 && 
+                         getBus(true, 1)->isEnabled() && 
+                         sidechainBuffer.getNumChannels() > 0);
+
+    spectralEngine.process(mainBuffer, 
+                           hasSidechain ? &sidechainBuffer : nullptr, 
+                           apvts, spectrumDataLeft, compressionDeltaData);
+
+    static int debugCounter = 0;
+    if (++debugCounter >= 100) {
+        debugCounter = 0;
+
+        float minDelta = 999.0f, maxDelta = -999.0f, avgDelta = 0.0f;
+        int validBins = 0;
+
+        for (int i = 10; i < 200; ++i) {
+            float delta = compressionDeltaData[i].load(std::memory_order_relaxed);
+            if (std::abs(delta) < 30.0f) {
+                minDelta = juce::jmin(minDelta, delta);
+                maxDelta = juce::jmax(maxDelta, delta);
+                avgDelta += delta;
+                ++validBins;
+            }
+        }
+
+        if (validBins > 0) {
+            avgDelta /= validBins;
+
+            DBG("=== GAIN STAGING ===");
+            DBG("Input level: " + juce::String(juce::Decibels::gainToDecibels(buffer.getRMSLevel(0, 0, buffer.getNumSamples())), 1) + " dB");
+            DBG("Min gain delta: " + juce::String(minDelta, 2) + " dB");
+            DBG("Max gain delta: " + juce::String(maxDelta, 2) + " dB");
+            DBG("Avg gain delta: " + juce::String(avgDelta, 2) + " dB");
+            DBG("===================");
+        }
+    }
+
+    // 4. Dry/wet mix с плавным сглаживанием (РЕШАЕТ ЩЕЛЧКИ ПРИ АВТОМАТИЗАЦИИ)
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        auto* wet = buffer.getWritePointer(ch);
+        const auto* dry = delayedDryBuffer.getReadPointer(ch);
+        
+        for (int i = 0; i < numSamples; ++i)
         {
-            auto* wet = buffer.getWritePointer(ch);
-            const auto* dry = dryBuffer.getReadPointer(ch);
-            for (int i = 0; i < numSamples; ++i)
-                wet[i] = wet[i] * mixWet + dry[i] * mixDry;
+            float mixWet = smoothedMix.getNextValue();
+            float mixDry = 1.0f - mixWet;
+            wet[i] = wet[i] * mixWet + dry[i] * mixDry;
         }
     }
 
@@ -193,6 +350,80 @@ void TroakarSpectralAudioProcessor::setStateInformation (const void* data, int s
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
     if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
         apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+}
+
+bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
+{
+    bool changed = false;
+    for (size_t i = 0; i < audioThreadGradients.size() && i < 4; ++i)
+    {
+        juce::String prefix = "GRADIENT_" + juce::String((int)i);
+        auto& point = audioThreadGradients[i];
+
+        bool  active = *apvts.getRawParameterValue(prefix + "_ENABLE") > 0.5f;
+        float freq   = *apvts.getRawParameterValue(prefix + "_CENTER_FREQ");
+        float gain   = *apvts.getRawParameterValue(prefix + "_CENTER_GAIN");
+        float bw     = *apvts.getRawParameterValue(prefix + "_BANDWIDTH");
+        float amt    = *apvts.getRawParameterValue(prefix + "_AMOUNT");
+        float up     = *apvts.getRawParameterValue(prefix + "_UP_MAX");
+        float dn     = *apvts.getRawParameterValue(prefix + "_DOWN_MAX");
+        float spd    = *apvts.getRawParameterValue(prefix + "_SPEED");
+        float sm     = *apvts.getRawParameterValue(prefix + "_SMOOTH");
+
+        if (point.active != active || point.centerFreqHz != freq || point.centerGainDb != gain ||
+            point.radiusOctaves != bw || point.amountPct != amt ||
+            point.upMaxDb != up || point.downMaxDb != dn ||
+            point.speedPct != spd || point.smoothPct != sm) 
+        {
+            changed = true;
+            point.active = active;
+            point.centerFreqHz = freq;
+            point.centerGainDb = gain;
+            point.radiusOctaves = bw;
+            point.amountPct = amt;
+            point.upMaxDb = up;
+            point.downMaxDb = dn;
+            point.speedPct = spd;
+            point.smoothPct = sm;
+        }
+    }
+    return changed;
+}
+
+void TroakarSpectralAudioProcessor::syncGradientPointsToAPVTS()
+{
+    for (size_t i = 0; i < 4; ++i)
+    {
+        juce::String prefix = "GRADIENT_" + juce::String((int)i);
+        auto* enableParam = apvts.getParameter(prefix + "_ENABLE");
+        
+        if (i < gradientManager.points.size())
+        {
+            const auto& point = gradientManager.points[i];
+            auto* freqParam   = apvts.getParameter(prefix + "_CENTER_FREQ");
+            auto* gainParam   = apvts.getParameter(prefix + "_CENTER_GAIN");
+            auto* bwParam     = apvts.getParameter(prefix + "_BANDWIDTH");
+            auto* amountParam = apvts.getParameter(prefix + "_AMOUNT");
+            auto* upParam     = apvts.getParameter(prefix + "_UP_MAX");
+            auto* downParam   = apvts.getParameter(prefix + "_DOWN_MAX");
+            auto* speedParam  = apvts.getParameter(prefix + "_SPEED");
+            auto* smoothParam = apvts.getParameter(prefix + "_SMOOTH");
+
+            enableParam->setValueNotifyingHost(point.active ? 1.0f : 0.0f);
+            freqParam->setValueNotifyingHost(freqParam->convertTo0to1(point.centerFreqHz));
+            gainParam->setValueNotifyingHost(gainParam->convertTo0to1(point.centerGainDb));
+            bwParam->setValueNotifyingHost(bwParam->convertTo0to1(point.radiusOctaves));
+            amountParam->setValueNotifyingHost(amountParam->convertTo0to1(point.amountPct));
+            upParam->setValueNotifyingHost(upParam->convertTo0to1(point.upMaxDb));
+            downParam->setValueNotifyingHost(downParam->convertTo0to1(point.downMaxDb));
+            speedParam->setValueNotifyingHost(speedParam->convertTo0to1(point.speedPct));
+            smoothParam->setValueNotifyingHost(smoothParam->convertTo0to1(point.smoothPct));
+        }
+        else
+        {
+            enableParam->setValueNotifyingHost(0.0f);
+        }
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

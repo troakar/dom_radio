@@ -5,9 +5,8 @@
 #include <cmath>
 #include "UI/GradientBandModel.h"
 
-constexpr int FFT_ORDER  = 9;                // 512 сэмплов (11 мс)
-constexpr int FFT_SIZE   = 1 << FFT_ORDER;   // 512
-constexpr int HOP_SIZE   = FFT_SIZE / 4;     // 75% overlap
+// Константа максимального размера буфера (устраняет ошибку порядка компиляции C++)
+constexpr int MAX_FFT_BINS = 1024;
 
 inline float fast_tanh_sc(float x) noexcept
 {
@@ -19,147 +18,203 @@ inline float fast_tanh_sc(float x) noexcept
     return num / (den + 1.0e-9f);
 }
 
-// Легковесный стек-фильтр RBJ Biquad (0% алокаций памяти)
+// Переведено на double для исключения искажений на НЧ
 struct FastBiquadParams {
-    float c0 = 1.0f, c1 = 0.0f, c2 = 0.0f;
-    float d0 = 1.0f, d1 = 0.0f, d2 = 0.0f;
+    double c0 = 1.0, c1 = 0.0, c2 = 0.0;
+    double d0 = 1.0, d1 = 0.0, d2 = 0.0;
 
-    void setPeak(float sr, float f0, float q, float gainDb) {
-        if (std::abs(gainDb) < 0.01f) {
-            c0 = 1.0f; c1 = 0.0f; c2 = 0.0f;
-            d0 = 1.0f; d1 = 0.0f; d2 = 0.0f;
+    void setPeak(double sr, double f0, double q, double gainDb) {
+        if (std::abs(gainDb) < 0.01) {
+            c0 = 1.0; c1 = 0.0; c2 = 0.0;
+            d0 = 1.0; d1 = 0.0; d2 = 0.0;
             return;
         }
-        float A = std::pow(10.0f, gainDb / 40.0f);
-        float w0 = 2.0f * juce::MathConstants<float>::pi * f0 / sr;
-        float alpha = std::sin(w0) / (2.0f * std::max(0.05f, q));
-        float cosw0 = std::cos(w0);
+        double A = std::pow(10.0, gainDb / 40.0);
+        double w0 = 2.0 * juce::MathConstants<double>::pi * f0 / sr;
+        double alpha = std::sin(w0) / (2.0 * std::max(0.05, q));
+        double cosw0 = std::cos(w0);
 
-        float a0_inv = 1.0f / (1.0f + alpha / A);
+        double a0_inv = 1.0 / (1.0 + alpha / A);
 
-        float b0 = (1.0f + alpha * A) * a0_inv;
-        float b1 = (-2.0f * cosw0) * a0_inv;
-        float b2 = (1.0f - alpha * A) * a0_inv;
-        float a1 = (-2.0f * cosw0) * a0_inv;
-        float a2 = (1.0f - alpha / A) * a0_inv;
+        double b0 = (1.0 + alpha * A) * a0_inv;
+        double b1 = (-2.0 * cosw0) * a0_inv;
+        double b2 = (1.0 - alpha * A) * a0_inv;
+        double a1 = (-2.0 * cosw0) * a0_inv;
+        double a2 = (1.0 - alpha / A) * a0_inv;
 
         c0 = b0*b0 + b1*b1 + b2*b2;
-        c1 = 2.0f * (b0*b1 + b1*b2);
-        c2 = 2.0f * b0*b2;
+        c1 = 2.0 * (b0*b1 + b1*b2);
+        c2 = 2.0 * b0*b2;
 
-        d0 = 1.0f + a1*a1 + a2*a2;
-        d1 = 2.0f * (a1 + a1*a2);
-        d2 = 2.0f * a2;
+        d0 = 1.0 + a1*a1 + a2*a2;
+        d1 = 2.0 * (a1 + a1*a2);
+        d2 = 2.0 * a2;
     }
 
-    inline float getMagSq(float cw, float c2w) const {
-        float num = c0 + c1 * cw + c2 * c2w;
-        float den = d0 + d1 * cw + d2 * c2w;
-        return num / std::max(1.0e-9f, den);
+    inline double getMagSq(double cw, double c2w) const {
+        double num = c0 + c1 * cw + c2 * c2w;
+        double den = d0 + d1 * cw + d2 * c2w;
+        return num / std::max(1.0e-15, den);
     }
 };
 
 class SpectralEngine
 {
 public:
-    SpectralEngine()
-        : forwardFFT(FFT_ORDER),
-          inverseFFT(FFT_ORDER),
-          window(FFT_SIZE, juce::dsp::WindowingFunction<float>::hann)
-    {}
+    SpectralEngine() {}
 
     void prepare(double sampleRate)
     {
         sr = sampleRate;
+        switchFFTSize(512); // Инициализируем плагин размером по умолчанию
+    }
 
-        inputFifo .assign(2, std::vector<float>(FFT_SIZE, 0.0f));
-        outputFifo.assign(2, std::vector<float>(FFT_SIZE, 0.0f));
+    void switchFFTSize(int newSize)
+    {
+        currentFFTSize = newSize;
+        currentFFTOrder = static_cast<int>(std::log2(currentFFTSize));
+        currentHopSize = currentFFTSize / 4;
+
+        forwardFFT = std::make_unique<juce::dsp::FFT>(currentFFTOrder);
+        inverseFFT = std::make_unique<juce::dsp::FFT>(currentFFTOrder);
+
+        inputFifo.assign(2, std::vector<float>(currentFFTSize, 0.0f));
+        outputFifo.assign(2, std::vector<float>(currentFFTSize, 0.0f));
+        sidechainFifo.assign(2, std::vector<float>(currentFFTSize, 0.0f));
+        fftWorkBuf.assign(2, std::vector<float>(currentFFTSize * 2, 0.0f));
         fifoIndex = 0;
         hopCounter = 0;
 
-        fftWorkBuf.assign(2, std::vector<float>(FFT_SIZE * 2, 0.0f));
-
-        const int numBins = FFT_SIZE / 2;
+        const int numBins = currentFFTSize / 2;
         peakEnvBin.assign(numBins, 0.0f);
         rmsEnvBin.assign(numBins, 0.0f);
         bandGainsBin.assign(numBins, 1.0f);
         rawDeltaDb.assign(numBins, 0.0f);
         binTargetDb.assign(numBins, 0.0f);
 
-        // Буферы градиентов
-        binAmountNorm.assign(numBins, 0.0f);
-        binUpMaxDb.assign(numBins, 0.0f);
-        binDownMaxDb.assign(numBins, 0.0f);
-        binWeightSum.assign(numBins, 0.0f);
-        gradientBandsActive = false;
+        binPAtk.assign(numBins, 1.0f);
+        binPRel.assign(numBins, 1.0f);
+        binRAtk.assign(numBins, 1.0f);
+        binRRel.assign(numBins, 1.0f);
+        binEnvSpeed.assign(numBins, 0.5f);
+        binSmoothCoef.assign(numBins, 0.5f);
+        binEffectiveAmount.assign(numBins, 0.0f);
+        binEffectiveUp.assign(numBins, 0.0f);
+        binEffectiveDown.assign(numBins, 0.0f);
+        binThreshOffsetDb.assign(numBins, 0.0f);
 
-        // Таблицы предрасчета косинусов для устранения тригонометрии в цикле
         cosW.resize(numBins);
         cos2W.resize(numBins);
         for (int bin = 1; bin < numBins; ++bin) {
-            float w = 2.0f * juce::MathConstants<float>::pi * static_cast<float>(bin) / static_cast<float>(FFT_SIZE);
+            double w = 2.0 * juce::MathConstants<double>::pi * static_cast<double>(bin) / static_cast<double>(currentFFTSize);
             cosW[bin] = std::cos(w);
-            cos2W[bin] = std::cos(2.0f * w);
+            cos2W[bin] = std::cos(2.0 * w);
         }
 
-        hannWindow.resize(FFT_SIZE);
-        window.fillWindowingTables(hannWindow.data(), FFT_SIZE,
-                                   juce::dsp::WindowingFunction<float>::hann);
+        hannWindow.resize(currentFFTSize);
+        juce::dsp::WindowingFunction<float>::fillWindowingTables(
+            hannWindow.data(),
+            currentFFTSize,
+            juce::dsp::WindowingFunction<float>::hann,
+            false);
 
         olaGain = 1.0f / 1.5f;
         targetDirty = true;
+        envelopeSettled = false;
+        settleCounter = 0;
+        smoothedParamsInitialised = false;
     }
 
-    // ВЫНЕСЕНО В PUBLIC СЕКЦИЮ ДЛЯ ДОСТУПА ИЗ PluginProcessor
-    void refreshGradientBands(const std::vector<GradientBand>& bands, double sampleRate)
+    void updateParameters(float globalUpMax, float globalDownMax, float globalAmountPct, 
+                          float globalSpeedPct, float globalSmoothPct, 
+                          const std::vector<GradientPoint>& points, double sampleRate)
     {
-        const int numBins = FFT_SIZE / 2;
-        binAmountNorm.assign(numBins, 0.0f);
-        binUpMaxDb.assign(numBins, 0.0f);
-        binDownMaxDb.assign(numBins, 0.0f);
-        binWeightSum.assign(numBins, 0.0f);
-        gradientBandsActive = false;
+        const int numBins = currentFFTSize / 2;
+        const float hopsPerSec = static_cast<float>(sampleRate) / currentHopSize;
+        
+        float globalAmountNorm = juce::jlimit(0.0f, 2.0f, globalAmountPct / 100.0f);
+        float globalSpeedNorm  = juce::jlimit(0.0f, 1.0f, globalSpeedPct / 100.0f);
+        float globalSmoothNorm = juce::jlimit(0.0f, 1.0f, globalSmoothPct / 100.0f);
 
-        for (const auto& band : bands)
-        {
-            if (!band.enabled) continue;
+        std::vector<float> binWeightSum(numBins, 0.0f);
+        std::vector<float> binSpeedNorm(numBins, 0.0f);
+        std::vector<float> binSmoothNorm(numBins, 0.0f);
+        
+        binEffectiveAmount.assign(numBins, 0.0f);
+        binEffectiveUp.assign(numBins, 0.0f);
+        binEffectiveDown.assign(numBins, 0.0f);
+        binThreshOffsetDb.assign(numBins, 0.0f);
+        
+        bool hasActiveGradients = false;
 
-            float sigma = band.bandwidthOctaves * 0.6f;
-            float amountNorm = juce::jlimit(0.0f, 2.0f, band.amountPct / 100.0f);
+        for (const auto& point : points) {
+            if (!point.active) continue;
+            hasActiveGradients = true;
+            
+            float ptAmt = juce::jlimit(0.0f, 2.0f, point.amountPct / 100.0f);
+            float ptSpd = point.speedPct / 100.0f;
+            float ptSm  = point.smoothPct / 100.0f;
 
-            for (int bin = 1; bin < numBins; ++bin)
-            {
-                double freq = (double)bin * sampleRate / (double)FFT_SIZE;
+            for (int bin = 1; bin < numBins; ++bin) {
+                double freq = (double)bin * sampleRate / (double)currentFFTSize;
                 if (freq < 20.0 || freq > 20000.0) continue;
 
-                double logDist = std::log2(freq / band.centerFreqHz);
-                float weight = std::exp(-0.5f * (float)((logDist / sigma) * (logDist / sigma)));
+                float logDist = (float)std::log2(freq / point.centerFreqHz);
+                float weight = std::exp(-0.5f * (logDist / point.radiusOctaves) * (logDist / point.radiusOctaves));
                 weight = juce::jlimit(0.0f, 1.0f, weight);
 
-                binAmountNorm[bin] += amountNorm * weight;
-                binUpMaxDb[bin] += band.upMaxDb * weight;
-                binDownMaxDb[bin] += band.downMaxDb * weight;
-                binWeightSum[bin] += weight;
+                binEffectiveAmount[bin] += ptAmt * weight;
+                binEffectiveUp[bin]     += point.upMaxDb * weight;
+                binEffectiveDown[bin]   += point.downMaxDb * weight;
+                binThreshOffsetDb[bin]  += point.centerGainDb * weight;
+                binSpeedNorm[bin]       += ptSpd * weight;
+                binSmoothNorm[bin]      += ptSm * weight;
+                binWeightSum[bin]       += weight;
             }
         }
 
-        for (int bin = 1; bin < numBins; ++bin)
-        {
-            if (binWeightSum[bin] > 0.001f)
-            {
-                gradientBandsActive = true;
+        for (int bin = 1; bin < numBins; ++bin) {
+            float finalSpd = globalSpeedNorm;
+            float finalSm  = globalSmoothNorm;
+
+            float W = juce::jlimit(0.0f, 1.0f, binWeightSum[bin]);
+
+            if (hasActiveGradients && W > 0.001f) {
                 float invW = 1.0f / binWeightSum[bin];
-                binAmountNorm[bin] *= invW;
-                binUpMaxDb[bin] *= invW;
-                binDownMaxDb[bin] *= invW;
+                
+                float localAmt = binEffectiveAmount[bin] * invW;
+                float localUp  = binEffectiveUp[bin] * invW;
+                float localDown = binEffectiveDown[bin] * invW;
+                float localSpd = binSpeedNorm[bin] * invW;
+                float localSm  = binSmoothNorm[bin] * invW;
+                float localThresh = binThreshOffsetDb[bin] * invW;
+
+                binEffectiveAmount[bin] = globalAmountNorm * (1.0f - W) + localAmt * W;
+                binEffectiveUp[bin]     = globalUpMax * (1.0f - W) + localUp * W;
+                binEffectiveDown[bin]   = globalDownMax * (1.0f - W) + localDown * W;
+                finalSpd                = globalSpeedNorm * (1.0f - W) + localSpd * W;
+                finalSm                 = globalSmoothNorm * (1.0f - W) + localSm * W;
+                binThreshOffsetDb[bin]  = localThresh * W; 
+            } else {
+                binEffectiveAmount[bin] = globalAmountNorm;
+                binEffectiveUp[bin]     = globalUpMax;
+                binEffectiveDown[bin]   = globalDownMax;
+                binThreshOffsetDb[bin]  = 0.0f;
             }
+
+            binEnvSpeed[bin] = finalSpd;
+            binPAtk[bin] = 1.0f - std::exp(-1.0f / ((0.001f + finalSpd * 0.010f) * hopsPerSec));
+            binPRel[bin] = 1.0f - std::exp(-1.0f / ((0.050f + finalSpd * 0.150f) * hopsPerSec));
+            binRAtk[bin] = 1.0f - std::exp(-1.0f / ((0.100f + finalSpd * 0.400f) * hopsPerSec));
+            binRRel[bin] = 1.0f - std::exp(-1.0f / ((0.300f + finalSpd * 0.800f) * hopsPerSec));
+            
+            binSmoothCoef[bin] = juce::jlimit(0.2f, 0.98f, 0.4f + finalSm * 0.58f);
         }
     }
 
     void process(juce::AudioBuffer<float>& buffer,
+                 const juce::AudioBuffer<float>* sidechainBuffer,
                  juce::AudioProcessorValueTreeState& apvts,
-                 float upMaxDb, float downMaxDb, float amountPct,
-                 float speedPct, float smoothPct,
                  std::atomic<float>* vizSpectrumL,
                  std::atomic<float>* vizDeltaL)
     {
@@ -167,111 +222,116 @@ public:
         const int numChannels = juce::jmin(buffer.getNumChannels(), 2);
         if (numSamples == 0 || numChannels == 0) return;
 
-        const float hopsPerSec = static_cast<float>(sr) / HOP_SIZE;
-        const float sp = juce::jlimit(0.0f, 1.0f, speedPct / 100.0f);
-        const float sm = juce::jlimit(0.0f, 1.0f, smoothPct / 100.0f);
-        const float amountNorm = juce::jlimit(0.0f, 2.0f, amountPct / 100.0f);
+        const bool hasSidechain = (sidechainBuffer != nullptr && sidechainBuffer->getNumChannels() > 0);
+        const int scChannels = hasSidechain ? juce::jmin(sidechainBuffer->getNumChannels(), 2) : 0;
 
-        // Сглаживание параметров для устранения Zipper Noise при кручении ручек
         const float rawThresh = *apvts.getRawParameterValue("GLOBAL_THRESH");
-        smoothGlobalThresh += 0.15f * (rawThresh - smoothGlobalThresh);
-        smoothAmount       += 0.15f * (amountNorm - smoothAmount);
-        smoothUpMax        += 0.15f * (upMaxDb    - smoothUpMax);
-        smoothDownMax      += 0.15f * (downMaxDb  - smoothDownMax);
-
-        const float peakAtkT = 1.0f - std::exp(-1.0f / ((0.001f + sp * 0.010f) * hopsPerSec));
-        const float peakRelT = 1.0f - std::exp(-1.0f / ((0.050f + sp * 0.150f) * hopsPerSec));
-        const float rmsAtkT  = 1.0f - std::exp(-1.0f / ((0.100f + sp * 0.400f) * hopsPerSec));
-        const float rmsRelT  = 1.0f - std::exp(-1.0f / ((0.300f + sp * 0.800f) * hopsPerSec));
+        if (!smoothedParamsInitialised) {
+            smoothGlobalThresh = rawThresh;
+            smoothedParamsInitialised = true;
+        } else {
+            smoothGlobalThresh += 0.15f * (rawThresh  - smoothGlobalThresh);
+        }
 
         refreshTargetIfNeeded(apvts);
 
-        for (int i = 0; i < numSamples; ++i)
-        {
-            for (int ch = 0; ch < numChannels; ++ch)
-            {
+        for (int i = 0; i < numSamples; ++i) {
+            for (int ch = 0; ch < numChannels; ++ch) {
                 inputFifo[ch][fifoIndex] = buffer.getSample(ch, i);
-                const float out = outputFifo[ch][fifoIndex] * olaGain;
-                buffer.setSample(ch, i, out);
+                buffer.setSample(ch, i, outputFifo[ch][fifoIndex] * olaGain);
                 outputFifo[ch][fifoIndex] = 0.0f;
             }
 
-            fifoIndex = (fifoIndex + 1) % FFT_SIZE;
-            ++hopCounter;
+            if (hasSidechain) {
+                for (int ch = 0; ch < scChannels; ++ch) {
+                    sidechainFifo[ch][fifoIndex] = sidechainBuffer->getSample(ch, i);
+                }
+            }
 
-            if (hopCounter >= HOP_SIZE)
-            {
+            fifoIndex = (fifoIndex + 1) % currentFFTSize;
+            if (++hopCounter >= currentHopSize) {
                 hopCounter = 0;
-                processFFTFrame(numChannels, smoothUpMax, smoothDownMax, smoothAmount, smoothGlobalThresh,
-                               peakAtkT, peakRelT, rmsAtkT, rmsRelT, sp, sm,
-                               vizSpectrumL, vizDeltaL);
+                processFFTFrame(numChannels, hasSidechain ? scChannels : 0, 
+                                smoothGlobalThresh, vizSpectrumL, vizDeltaL);
             }
         }
     }
 
 private:
-    void processFFTFrame(int numChannels,
-                         float upMaxDb, float downMaxDb, float amountNorm, float globalThreshDb,
-                         float pAtk, float pRel, float rAtk, float rRel,
-                         float speedNorm, float smoothNorm,
-                         std::atomic<float>* vizSpectrumL,
-                         std::atomic<float>* vizDeltaL)
+    void processFFTFrame(int numChannels, int scChannels, float globalThreshDb,
+                         std::atomic<float>* vizSpectrumL, std::atomic<float>* vizDeltaL)
     {
-        const int numBins = FFT_SIZE / 2;
-        float binMagMax[FFT_SIZE / 2] = {};
+        const int numBins = currentFFTSize / 2;
+        float binMagMax[MAX_FFT_BINS] = {};
+        const bool useSidechain = (scChannels > 0);
 
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            for (int k = 0; k < FFT_SIZE; ++k)
-            {
-                const int readIdx = (fifoIndex + k) % FFT_SIZE;
-                fftWorkBuf[ch][k]            = inputFifo[ch][readIdx] * hannWindow[k];
-                fftWorkBuf[ch][k + FFT_SIZE] = 0.0f;
-            }
-            forwardFFT.performRealOnlyForwardTransform(fftWorkBuf[ch].data());
-
-            for (int bin = 1; bin < numBins; ++bin)
-            {
-                const float re = fftWorkBuf[ch][bin * 2];
-                const float im = fftWorkBuf[ch][bin * 2 + 1];
-                const float mag = std::sqrt(re * re + im * im) / (FFT_SIZE * 0.5f);
-                binMagMax[bin] = std::max(binMagMax[bin], mag);
+        if (useSidechain) {
+            for (int ch = 0; ch < scChannels; ++ch) {
+                for (int k = 0; k < currentFFTSize; ++k) {
+                    const int readIdx = (fifoIndex + k) % currentFFTSize;
+                    fftWorkBuf[ch][k]            = sidechainFifo[ch][readIdx] * hannWindow[k];
+                    fftWorkBuf[ch][k + currentFFTSize] = 0.0f;
+                }
+                forwardFFT->performRealOnlyForwardTransform(fftWorkBuf[ch].data());
+                for (int bin = 1; bin < numBins; ++bin) {
+                    const float re = fftWorkBuf[ch][bin * 2];
+                    const float im = fftWorkBuf[ch][bin * 2 + 1];
+                    const float mag = std::sqrt(re * re + im * im) / (currentFFTSize * 0.5f);
+                    binMagMax[bin] = std::max(binMagMax[bin], mag);
+                }
             }
         }
 
-        for (int bin = 1; bin < numBins; ++bin)
-        {
+        for (int ch = 0; ch < numChannels; ++ch) {
+            for (int k = 0; k < currentFFTSize; ++k) {
+                const int readIdx = (fifoIndex + k) % currentFFTSize;
+                fftWorkBuf[ch][k]            = inputFifo[ch][readIdx] * hannWindow[k];
+                fftWorkBuf[ch][k + currentFFTSize] = 0.0f;
+            }
+            forwardFFT->performRealOnlyForwardTransform(fftWorkBuf[ch].data());
+
+            if (!useSidechain) {
+                for (int bin = 1; bin < numBins; ++bin) {
+                    const float re = fftWorkBuf[ch][bin * 2];
+                    const float im = fftWorkBuf[ch][bin * 2 + 1];
+                    const float mag = std::sqrt(re * re + im * im) / (currentFFTSize * 0.5f);
+                    binMagMax[bin] = std::max(binMagMax[bin], mag);
+                }
+            }
+        }
+
+        for (int bin = 1; bin < numBins; ++bin) {
             const float mag = binMagMax[bin];
+
+            float pAtk = binPAtk[bin], pRel = binPRel[bin];
+            float rAtk = binRAtk[bin], rRel = binRRel[bin];
+            if (!envelopeSettled) { pAtk = 1.0f; rAtk = 0.2f; }
 
             peakEnvBin[bin] += (mag > peakEnvBin[bin] ? pAtk : pRel) * (mag - peakEnvBin[bin]);
             rmsEnvBin[bin]  += (mag > rmsEnvBin[bin]  ? rAtk : rRel) * (mag - rmsEnvBin[bin]);
 
-            const float env = peakEnvBin[bin] * (1.0f - speedNorm) + rmsEnvBin[bin] * speedNorm;
-            const float envDb = juce::Decibels::gainToDecibels(std::max(env, 1.0e-6f));
+            const float env = peakEnvBin[bin] * (1.0f - binEnvSpeed[bin]) + rmsEnvBin[bin] * binEnvSpeed[bin];
+            const float envDb = juce::Decibels::gainToDecibels(std::max(env, 1.0e-7f));
 
-            const float multibandComp = 15.0f; 
-            const float rawDelta = (binTargetDb[bin] + globalThreshDb - multibandComp) - envDb;
+            // ОРИГИНАЛЬНАЯ ФОРМУЛА MATCHING: Целевой уровень - Текущий спектр
+            const float multibandComp = 15.0f;
+            const float localThreshOffset = binThreshOffsetDb[bin];
+            const float targetLevelDb = binTargetDb[bin] + globalThreshDb + localThreshOffset - multibandComp;
+            
+            const float rawDelta = targetLevelDb - envDb;
 
             float noiseGate = 1.0f;
             if (envDb < -90.0f) {
                 noiseGate = std::max(0.0f, (envDb + 110.0f) / 20.0f);
             }
 
-            float effectiveAmount = amountNorm;
-            float effectiveUpMax = upMaxDb;
-            float effectiveDownMax = downMaxDb;
+            float effectiveAmount  = binEffectiveAmount[bin];
+            float effectiveUpMax   = binEffectiveUp[bin];
+            float effectiveDownMax = binEffectiveDown[bin];
 
-            if (gradientBandsActive && binWeightSum[bin] > 0.001f)
-            {
-                effectiveAmount   = binAmountNorm[bin];
-                effectiveUpMax    = binUpMaxDb[bin];
-                effectiveDownMax  = binDownMaxDb[bin];
-            }
-
-            const float ratioDepth = effectiveAmount; 
-            
+            const float ratioDepth = effectiveAmount;
             float variMuDelta = 0.0f;
-            const float kneeWidthDb = 12.0f; // Стабильное колено Vari-Mu
+            const float kneeWidthDb = 12.0f;
 
             if (rawDelta > 0.0f) {
                 if (effectiveUpMax > 0.001f) {
@@ -288,49 +348,77 @@ private:
             rawDeltaDb[bin] = variMuDelta;
         }
 
-        const int blurRadius = static_cast<int>(smoothNorm * 18.0f);
+        // 1. Рассчитываем сырую дельту для всех бинов
+        for (int bin = 1; bin < numBins; ++bin) {
+            const float mag = binMagMax[bin];
+            float pAtk = binPAtk[bin], pRel = binPRel[bin];
+            float rAtk = binRAtk[bin], rRel = binRRel[bin];
+            if (!envelopeSettled) { pAtk = 1.0f; rAtk = 0.2f; }
 
-        for (int bin = 1; bin < numBins; ++bin)
-        {
-            float finalDeltaDb = 0.0f;
+            peakEnvBin[bin] += (mag > peakEnvBin[bin] ? pAtk : pRel) * (mag - peakEnvBin[bin]);
+            rmsEnvBin[bin]  += (mag > rmsEnvBin[bin]  ? rAtk : rRel) * (mag - rmsEnvBin[bin]);
 
-            if (blurRadius <= 0)
-            {
-                finalDeltaDb = rawDeltaDb[bin];
+            const float env = peakEnvBin[bin] * (1.0f - binEnvSpeed[bin]) + rmsEnvBin[bin] * binEnvSpeed[bin];
+            const float envDb = juce::Decibels::gainToDecibels(std::max(env, 1.0e-7f));
+
+            const float multibandComp = 15.0f;
+            const float targetLevelDb = binTargetDb[bin] + globalThreshDb + binThreshOffsetDb[bin] - multibandComp;
+            const float rawDelta = targetLevelDb - envDb;
+
+            // Защита от усиления шума (Noise Gate)
+            float noiseGate = 1.0f;
+            if (envDb < -65.0f) {
+                noiseGate = std::max(0.0f, (envDb + 85.0f) / 20.0f);
             }
-            else
-            {
-                float weightSum = 0.0f;
-                float valSum = 0.0f;
 
-                for (int r = -blurRadius; r <= blurRadius; ++r) {
-                    const int sampleBin = juce::jlimit(1, numBins - 1, bin + r);
-                    const float weight = 1.0f - (std::abs(r) / static_cast<float>(blurRadius + 1));
-                    valSum += rawDeltaDb[sampleBin] * weight;
-                    weightSum += weight;
+            float ratioDepth = binEffectiveAmount[bin];
+            float variMuDelta = 0.0f;
+            const float kneeWidthDb = 12.0f;
+
+            if (rawDelta > 0.0f) {
+                if (binEffectiveUp[bin] > 0.001f) {
+                    float normalizedInput = rawDelta / kneeWidthDb;
+                    variMuDelta = fast_tanh_sc(normalizedInput) * binEffectiveUp[bin] * ratioDepth * noiseGate;
                 }
-                finalDeltaDb = valSum / weightSum;
+            } else {
+                if (binEffectiveDown[bin] < -0.001f) {
+                    float normalizedInput = -rawDelta / kneeWidthDb;
+                    variMuDelta = fast_tanh_sc(normalizedInput) * binEffectiveDown[bin] * ratioDepth;
+                }
             }
-
-            const float targetGainLin = juce::Decibels::decibelsToGain(finalDeltaDb);
-            bandGainsBin[bin] += 0.25f * (targetGainLin - bandGainsBin[bin]);
+            rawDeltaDb[bin] = variMuDelta;
         }
 
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            for (int bin = 1; bin < numBins; ++bin)
-            {
+        // 2. ИДЕАЛЬНОЕ ПРОСТРАНСТВЕННОЕ СГЛАЖИВАНИЕ (Forward-Backward IIR)
+        std::vector<float> smoothedDelta(numBins, 0.0f);
+        smoothedDelta[1] = rawDeltaDb[1];
+        
+        for (int bin = 2; bin < numBins; ++bin) {
+            float coef = binSmoothCoef[bin];
+            smoothedDelta[bin] = smoothedDelta[bin - 1] * coef + rawDeltaDb[bin] * (1.0f - coef);
+        }
+        for (int bin = numBins - 2; bin >= 1; --bin) {
+            float coef = binSmoothCoef[bin];
+            smoothedDelta[bin] = smoothedDelta[bin + 1] * coef + smoothedDelta[bin] * (1.0f - coef);
+        }
+
+        // 3. Плавное применение
+        for (int bin = 1; bin < numBins; ++bin) {
+            const float targetGainLin = juce::Decibels::decibelsToGain(smoothedDelta[bin]);
+            bandGainsBin[bin] += 0.3f * (targetGainLin - bandGainsBin[bin]);
+        }
+
+        for (int ch = 0; ch < numChannels; ++ch) {
+            for (int bin = 1; bin < numBins; ++bin) {
                 fftWorkBuf[ch][bin * 2]     *= bandGainsBin[bin];
                 fftWorkBuf[ch][bin * 2 + 1] *= bandGainsBin[bin];
             }
 
-            if (ch == 0 && vizSpectrumL != nullptr && vizDeltaL != nullptr)
-            {
-                for (int bin = 1; bin < numBins; ++bin)
-                {
+            if (ch == 0 && vizSpectrumL != nullptr && vizDeltaL != nullptr) {
+                for (int bin = 1; bin < numBins; ++bin) {
                     const float re = fftWorkBuf[0][bin * 2];
                     const float im = fftWorkBuf[0][bin * 2 + 1];
-                    const float mag = std::sqrt(re * re + im * im) / (FFT_SIZE * 0.5f);
+                    const float mag = std::sqrt(re * re + im * im) / (currentFFTSize * 0.5f);
                     
                     const float tiltDb = 10.0f * std::log10(std::max(1.0f, (float)bin));
                     const float magDb = juce::Decibels::gainToDecibels(mag, -120.0f) + tiltDb + 15.0f;
@@ -340,28 +428,26 @@ private:
                     const float oldDelta = vizDeltaL[bin].load(std::memory_order_relaxed);
                     
                     vizSpectrumL[bin].store(oldMag * 0.5f + magDb * 0.5f, std::memory_order_relaxed);
-                    vizDeltaL[bin].store(oldDelta * 0.5f + gainDb * 0.5f, std::memory_order_relaxed);
+                    vizDeltaL[bin].store(oldDelta * 0.85f + gainDb * 0.15f, std::memory_order_relaxed);
                 }
             }
 
-            inverseFFT.performRealOnlyInverseTransform(fftWorkBuf[ch].data());
+            inverseFFT->performRealOnlyInverseTransform(fftWorkBuf[ch].data());
 
-            for (int k = 0; k < FFT_SIZE; ++k)
-            {
-                const int writeIdx = (fifoIndex + k) % FFT_SIZE;
+            for (int k = 0; k < currentFFTSize; ++k) {
+                const int writeIdx = (fifoIndex + k) % currentFFTSize;
                 outputFifo[ch][writeIdx] += fftWorkBuf[ch][k] * hannWindow[k];
             }
         }
     }
 
-    // БЕЗАЛОКАЦИОННЫЙ РАСЧЕТ ЦЕЛЕВОЙ КРИВОЙ ЭКВАЛАЙЗЕРА
     void refreshTargetIfNeeded(juce::AudioProcessorValueTreeState& apvts)
     {
         if (++targetRefreshCounter < 16 && !targetDirty) return;
         targetRefreshCounter = 0;
         targetDirty = false;
 
-        const int numBins = FFT_SIZE / 2;
+        const int numBins = currentFFTSize / 2;
 
         FastBiquadParams filters[8];
         int activeCount = 0;
@@ -381,35 +467,39 @@ private:
 
         for (int bin = 1; bin < numBins; ++bin)
         {
-            float totalMagSq = 1.0f;
-            float cw = cosW[bin];
-            float c2w = cos2W[bin];
+            double totalMagSq = 1.0;
+            double cw = cosW[bin];
+            double c2w = cos2W[bin];
 
             for (int f = 0; f < activeCount; ++f) {
                 totalMagSq *= filters[f].getMagSq(cw, c2w);
             }
 
-            // 10 * log10(magSq) = gainToDecibels из квадрата амплитуды
-            binTargetDb[bin] = 10.0f * std::log10(std::max(1.0e-9f, totalMagSq));
+            binTargetDb[bin] = static_cast<float>(10.0 * std::log10(std::max(1.0e-15, totalMagSq)));
         }
     }
 
     double sr = 44100.0;
 
-    juce::dsp::FFT forwardFFT;
-    juce::dsp::FFT inverseFFT;
-    juce::dsp::WindowingFunction<float> window;
+    // ДОБАВЬТЕ ЭТИ ТРИ СТРОКИ:
+    int currentFFTSize = 512;
+    int currentFFTOrder = 9;
+    int currentHopSize = 128;
+
+    std::unique_ptr<juce::dsp::FFT> forwardFFT;
+    std::unique_ptr<juce::dsp::FFT> inverseFFT;
     std::vector<float> hannWindow;
     float olaGain = 1.0f / 1.5f;
 
     std::vector<std::vector<float>> inputFifo;
     std::vector<std::vector<float>> outputFifo;
+    std::vector<std::vector<float>> sidechainFifo;
     std::vector<std::vector<float>> fftWorkBuf;
     int fifoIndex  = 0;
     int hopCounter = 0;
 
-    std::vector<float> cosW;
-    std::vector<float> cos2W;
+    std::vector<double> cosW;
+    std::vector<double> cos2W;
 
     std::vector<float> peakEnvBin;
     std::vector<float> rmsEnvBin;
@@ -417,18 +507,16 @@ private:
     std::vector<float> rawDeltaDb;
     std::vector<float> binTargetDb;
 
-    std::vector<float> binAmountNorm;
-    std::vector<float> binUpMaxDb;
-    std::vector<float> binDownMaxDb;
-    std::vector<float> binWeightSum;
-    bool gradientBandsActive = false;
+    std::vector<float> binPAtk, binPRel, binRAtk, binRRel, binEnvSpeed;
+    std::vector<float> binSmoothCoef;
+    std::vector<float> binEffectiveAmount, binEffectiveUp, binEffectiveDown;
+    std::vector<float> binThreshOffsetDb;
 
-    // Сглаженные значения параметров для убирания zipper noise
     float smoothGlobalThresh = 0.0f;
-    float smoothAmount       = 1.0f;
-    float smoothUpMax        = 4.0f;
-    float smoothDownMax      = -4.0f;
+    bool smoothedParamsInitialised = false;
 
     bool targetDirty = true;
     int  targetRefreshCounter = 0;
+    bool envelopeSettled = false;
+    int  settleCounter = 0;
 };

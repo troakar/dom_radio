@@ -1,5 +1,6 @@
 #include "GradientKnob.h"
 
+
 GradientKnob::GradientKnob(juce::AudioProcessorValueTreeState& apvts,
                            const juce::String& paramID,
                            const juce::String& labelText,
@@ -117,19 +118,27 @@ void GradientKnob::drawOuterRing(juce::Graphics& g, juce::Rectangle<float> bound
     }
     else if (!isLockedState)
     {
-        // РЕЖИМ 2: Ничего не выделено — вывод окантовок/засечек всех активных градиентов
+        // РЕЖИМ 2: Глобальный режим — стильные полукруглые окантовки-маркеры на орбите тумблера
         for (const auto& marker : gradientMarkers)
         {
             float angle = startAngle + marker.normalizedValue * (endAngle - startAngle);
-            float px = center.x + std::sin(angle) * radius;
-            float py = center.y - std::cos(angle) * radius;
-
-            // Точка-маркер соответствующего градиента на окантовке
-            g.setColour(marker.color);
-            g.fillEllipse(px - 2.5f, py - 2.5f, 5.0f, 5.0f);
             
-            g.setColour(juce::Colours::white.withAlpha(0.6f));
-            g.drawEllipse(px - 2.5f, py - 2.5f, 5.0f, 5.0f, 0.8f);
+            juce::Path markerArc;
+            float arcSpan = 0.12f; // Ширина полукруглой окантовки в радианах
+            
+            markerArc.addCentredArc(center.x, center.y, radius, radius, 0.0f, 
+                                    angle - arcSpan, angle + arcSpan, true);
+
+            // Основная цветная окантовка градиента
+            g.setColour(marker.color.withAlpha(0.85f));
+            g.strokePath(markerArc, juce::PathStrokeType(3.5f, juce::PathStrokeType::mitered, juce::PathStrokeType::rounded));
+            
+            // Внутренний блик-индикатор для резкости
+            juce::Path highlightArc;
+            highlightArc.addCentredArc(center.x, center.y, radius, radius, 0.0f, 
+                                       angle - arcSpan*0.2f, angle + arcSpan*0.2f, true);
+            g.setColour(juce::Colours::white.withAlpha(0.5f));
+            g.strokePath(highlightArc, juce::PathStrokeType(1.5f));
         }
     }
 }
