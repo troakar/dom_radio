@@ -4,21 +4,21 @@
 GradientKnob::GradientKnob(juce::AudioProcessorValueTreeState& apvts,
                            const juce::String& paramID,
                            const juce::String& labelText,
-                           bool allowInGradientMode)
-    : allowGradientMode(allowInGradientMode)
+                           bool allowInGradientMode,
+                           bool isSmallKnob)
+    : allowGradientMode(allowInGradientMode), isSmall(isSmallKnob)
 {
     slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 16);
+    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, isSmall ? 40 : 70, isSmall ? 12 : 16);
     slider.setPopupDisplayEnabled(true, true, nullptr);
     
-    // Отключаем стандартную отрисовку Slider, чтобы GradientKnob сам рисовал кастомный кноб
     slider.setAlpha(0.0f);
     addAndMakeVisible(slider);
 
     label.setText(labelText, juce::dontSendNotification);
     label.setJustificationType(juce::Justification::centred);
-    label.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    label.setColour(juce::Label::textColourId, juce::Colour::fromRGB(190, 185, 170));
+    label.setFont(juce::FontOptions(isSmall ? 9.0f : 11.0f, juce::Font::bold));
+    label.setColour(juce::Label::textColourId, isSmall ? juce::Colour::fromRGB(150, 145, 130) : juce::Colour::fromRGB(190, 185, 170));
     addAndMakeVisible(label);
 
     attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -29,7 +29,7 @@ void GradientKnob::setGradientActive(bool active, juce::Colour capColor)
 {
     if (!allowGradientMode)
     {
-        setLocked(active); // Если ручка не подлежит градиенту (например MIX) - блокируем её
+        setLocked(active);
         return;
     }
 
@@ -55,7 +55,7 @@ void GradientKnob::setGradientMarkers(const std::vector<GradientMarker>& markers
 void GradientKnob::resized()
 {
     auto bounds = getLocalBounds();
-    label.setBounds(bounds.removeFromTop(16));
+    label.setBounds(bounds.removeFromTop(isSmall ? 12 : 16));
     bounds.removeFromTop(2);
     slider.setBounds(bounds);
 }
@@ -65,8 +65,8 @@ void GradientKnob::paint(juce::Graphics& g)
     auto sliderBounds = slider.getBounds().toFloat();
     if (sliderBounds.isEmpty()) return;
 
-    float fullDiameter = juce::jmin(sliderBounds.getWidth(), sliderBounds.getHeight() - 18.0f);
-    float knobDiameter = fullDiameter * 0.75f; 
+    float fullDiameter = juce::jmin(sliderBounds.getWidth(), sliderBounds.getHeight() - (isSmall ? 14.0f : 18.0f));
+    float knobDiameter = fullDiameter * (isSmall ? 0.85f : 0.75f); 
     
     auto knobArea = juce::Rectangle<float>(0, 0, knobDiameter, knobDiameter)
                         .withCentre(sliderBounds.getCentre().withY(sliderBounds.getY() + fullDiameter * 0.5f));
@@ -84,10 +84,16 @@ void GradientKnob::paint(juce::Graphics& g)
     {
         g.setColour(juce::Colours::black.withAlpha(0.55f));
         g.fillEllipse(knobArea);
+    }
 
-        g.setColour(juce::Colour::fromRGB(220, 80, 80).withAlpha(0.85f));
-        g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
-        g.drawText("LOCKED", knobArea.toNearestInt(), juce::Justification::centred);
+    if (isLinkedState)
+    {
+        auto linkBadge = juce::Rectangle<float>(sliderBounds.getRight() - 16.0f, sliderBounds.getY() - 2.0f, 14.0f, 14.0f);
+        g.setColour(juce::Colour::fromRGB(100, 200, 255).withAlpha(0.85f));
+        g.fillEllipse(linkBadge);
+        g.setColour(juce::Colours::black);
+        g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+        g.drawText("L", linkBadge.toNearestInt(), juce::Justification::centred);
     }
 }
 
@@ -95,12 +101,12 @@ void GradientKnob::drawOuterRing(juce::Graphics& g, juce::Rectangle<float> bound
 {
     auto center = bounds.getCentre();
     float maxRadius = bounds.getWidth() * 0.5f;
-    float knobRadius = maxRadius * 0.75f;
+    float knobRadius = maxRadius * (isSmall ? 0.85f : 0.75f);
 
     juce::Path baseTrack;
     baseTrack.addCentredArc(center.x, center.y, knobRadius, knobRadius, 0.0f, startAngle, endAngle, true);
     g.setColour(juce::Colour::fromRGB(40, 36, 30));
-    g.strokePath(baseTrack, juce::PathStrokeType(2.5f));
+    g.strokePath(baseTrack, juce::PathStrokeType(isSmall ? 1.5f : 2.5f));
 
     if (isGradientSelected && allowGradientMode)
     {
@@ -110,9 +116,9 @@ void GradientKnob::drawOuterRing(juce::Graphics& g, juce::Rectangle<float> bound
         activeArc.addCentredArc(center.x, center.y, knobRadius, knobRadius, 0.0f, startAngle, currentAngle, true);
 
         g.setColour(activeCapColor.withAlpha(0.85f));
-        g.strokePath(activeArc, juce::PathStrokeType(3.0f));
+        g.strokePath(activeArc, juce::PathStrokeType(isSmall ? 2.0f : 3.0f));
     }
-    else if (!isLockedState)
+    else if (!isLockedState && !isSmall)
     {
         float ringSpacing = (maxRadius - knobRadius) / 4.0f;
 
@@ -143,12 +149,11 @@ void GradientKnob::drawKnobCap(juce::Graphics& g, juce::Rectangle<float> bounds,
     auto center = bounds.getCentre();
     float radius = bounds.getWidth() * 0.5f;
 
-    // Тень
     g.setColour(juce::Colours::black.withAlpha(0.4f));
     g.fillEllipse(bounds.translated(0.0f, 2.5f));
 
-    // Корпус ручки (Градиент крышечки зависит от выделения)
-    juce::Colour baseColor = isGradientSelected ? activeCapColor : juce::Colour::fromRGB(80, 75, 68);
+    juce::Colour baseColor = isGradientSelected ? activeCapColor 
+                           : (isSmall ? juce::Colour::fromRGB(55, 50, 45) : juce::Colour::fromRGB(80, 75, 68));
 
     juce::ColourGradient capGrad(
         baseColor.brighter(0.2f), center.x, bounds.getY(),
@@ -157,16 +162,16 @@ void GradientKnob::drawKnobCap(juce::Graphics& g, juce::Rectangle<float> bounds,
     g.setGradientFill(capGrad);
     g.fillEllipse(bounds);
 
-    // Металлическая или цветная фаска
     g.setColour(baseColor.brighter(0.4f).withAlpha(0.5f));
     g.drawEllipse(bounds, 1.2f);
 
-    // Оранжевая или белая стрелка-указатель
     juce::Path pointer;
     float pointerLength = radius * 0.75f;
-    pointer.addRoundedRectangle(-1.25f, -radius + 3.0f, 2.5f, pointerLength, 1.0f);
+    pointer.addRoundedRectangle(-1.25f, -radius + (isSmall ? 2.0f : 3.0f), 2.5f, pointerLength, 1.0f);
     pointer.applyTransform(juce::AffineTransform::rotation(angle).translated(center.x, center.y));
 
-    g.setColour(isGradientSelected ? juce::Colours::white : juce::Colour::fromRGB(255, 176, 40));
+    juce::Colour pointerColor = isGradientSelected ? juce::Colours::white 
+                              : (isSmall ? juce::Colours::white.withAlpha(0.7f) : juce::Colour::fromRGB(255, 176, 40));
+    g.setColour(pointerColor);
     g.fillPath(pointer);
 }

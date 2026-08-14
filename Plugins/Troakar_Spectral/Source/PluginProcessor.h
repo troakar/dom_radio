@@ -1,12 +1,14 @@
 #pragma once
 #include <JuceHeader.h>
+#include <array>
 #include "SpectralEngine.h"
 #include "UI/GradientBandModel.h"
 
 constexpr int NUM_TARGET_BANDS = 8;
 
 class TroakarSpectralAudioProcessor : public juce::AudioProcessor,
-                                      public juce::AudioProcessorValueTreeState::Listener
+                                      public juce::AudioProcessorValueTreeState::Listener,
+                                      public juce::AsyncUpdater
 {
 public:
     TroakarSpectralAudioProcessor();
@@ -41,13 +43,14 @@ public:
 
     bool syncGradientPointsFromAPVTS(); 
     void syncGradientPointsToAPVTS();
+    void handleAsyncUpdate() override;
 
     juce::AudioProcessorValueTreeState apvts;
 
-    std::vector<GradientPoint> audioThreadGradients;
+    std::array<GradientPoint, 4> audioThreadGradients;
     juce::LinearSmoothedValue<float> smoothedMix { 1.0f };
 
-    static constexpr int MAX_FFT_BINS = 1024;
+    static constexpr int MAX_FFT_BINS = 2048;
     std::atomic<float> spectrumDataLeft[MAX_FFT_BINS];
     std::atomic<float> compressionDeltaData[MAX_FFT_BINS];
     std::atomic<float> sidechainData[MAX_FFT_BINS];
@@ -63,20 +66,26 @@ public:
     float prevUpSel = -999.0f;
     float prevDownSel = -999.0f;
 
+    float prevAttackMs = -999.0f;
+    float prevReleaseMs = -999.0f;
+    float prevSpeedAuto = -999.0f;
+    float prevKneeWidth = -999.0f;
+    float prevLookaheadMs = -999.0f;
+
     GradientPointManager gradientManager;
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     SpectralEngine spectralEngine;
 
-    juce::AudioBuffer<float> dryDelayBuffer;
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::None> dryDelay { 8192 };
     juce::AudioBuffer<float> delayedDryBuffer; 
-    int dryDelayIndex = 0;
 
     int currentFFTSize = 512;
     int prevFFTMode = -1;
 
     std::atomic<int> visualFFTSize { 512 };
+    std::atomic<bool> requiresLatencyUpdate { false };
 
     static constexpr int MAX_BLOCK_SIZE = 16384; 
     
@@ -93,6 +102,7 @@ private:
     std::atomic<float>* pDownSel = nullptr;
     std::atomic<float>* pFftMode = nullptr;
     std::atomic<float>* pDeltaMode = nullptr;
+    std::atomic<float>* pViewRange = nullptr;
 
     std::atomic<float>* pGradEnable[4];
     std::atomic<float>* pGradFreq[4];
@@ -105,11 +115,21 @@ private:
     std::atomic<float>* pGradSmooth[4];
     std::atomic<float>* pGradUpSel[4];
     std::atomic<float>* pGradDownSel[4];
+    std::atomic<float>* pGradAutoSpeed[4];
+    std::atomic<float>* pGradAttack[4];
+    std::atomic<float>* pGradRelease[4];
+    std::atomic<float>* pGradKnee[4];
 
     std::atomic<float>* pBandEnable[8];
     std::atomic<float>* pBandFreq[8];
     std::atomic<float>* pBandGain[8];
     std::atomic<float>* pBandQ[8];
+
+    std::atomic<float>* pSpeedAuto = nullptr;
+    std::atomic<float>* pAttackMs = nullptr;
+    std::atomic<float>* pReleaseMs = nullptr;
+    std::atomic<float>* pKneeWidth = nullptr;
+    std::atomic<float>* pLookaheadMs = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TroakarSpectralAudioProcessor)
 };

@@ -27,7 +27,17 @@ private:
     struct ParameterListener : juce::AudioProcessorValueTreeState::Listener
     {
         ParameterListener(EQGraphLED& owner) : owner(owner) {}
-        void parameterChanged(const juce::String&, float) override { owner.targetPathDirty = true; }
+        void parameterChanged(const juce::String& paramID, float) override 
+        { 
+            if (paramID == "VIEW_RANGE") 
+            {
+                owner.updateViewRange(static_cast<int>(*owner.processor.apvts.getRawParameterValue("VIEW_RANGE")));
+            }
+            else
+            {
+                owner.targetPathDirty = true; 
+            }
+        }
         EQGraphLED& owner;
     };
 
@@ -72,6 +82,10 @@ private:
             updateTargetCurveCache();
 
         buildDeltaPaths();
+        
+        float currentThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
+        updateViewportFollow(currentThresh);
+        
         repaint();
     }
     void rebuildBackgroundCache();
@@ -122,7 +136,13 @@ private:
     int lastVisualFFTSize = 512;
     std::unique_ptr<ParameterListener> paramListener;
 
-    static constexpr float minDb = -36.0f;
-    static constexpr float maxDb = 6.0f;
+    float minDb = -18.0f;  
+    float maxDb = 12.0f;     // Запас +12 dB сверху
+    float baseViewDepth = 18.0f;
+    float viewportOffset = 0.0f;
+    float zoomIndicatorAlpha = 0.0f;
+    void updateViewRange(int rangeIndex);
+    void updateViewportFollow(float currentThreshold);
+    void cycleViewRange(int direction);
     const juce::Colour phosphor { juce::Colour::fromRGB(255, 176, 40) };
 };

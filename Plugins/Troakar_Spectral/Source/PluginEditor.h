@@ -31,10 +31,26 @@ private:
 
     juce::TextButton deltaButton;
     juce::ComboBox fftComboBox;
+    juce::ComboBox viewRangeComboBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> deltaAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> viewRangeAttachment;
+
+    juce::TextButton linkButton;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> linkAttachment;
+    double lastInGainValue = 0.0;
+    double lastOutLvlValue = 0.0;
+    bool isUpdatingLink = false;
+
+    juce::TextButton speedAutoButton;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> speedAutoAttachment;
+    std::unique_ptr<GradientKnob> attackKnob;
+    std::unique_ptr<GradientKnob> releaseKnob;
+    std::unique_ptr<GradientKnob> kneeKnob;
+    std::unique_ptr<GradientKnob> lookaheadKnob;
 
     void updateKnobStates();
+    void updateDynamicsKnobsVisibility();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TroakarSpectralAudioProcessorEditor)
 };

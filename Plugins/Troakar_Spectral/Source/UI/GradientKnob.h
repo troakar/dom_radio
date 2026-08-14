@@ -15,7 +15,8 @@ public:
     GradientKnob(juce::AudioProcessorValueTreeState& apvts,
                  const juce::String& paramID,
                  const juce::String& labelText,
-                 bool allowInGradientMode = true);
+                 bool allowInGradientMode = true,
+                 bool isSmallKnob = false);
 
     ~GradientKnob() override = default;
 
@@ -24,6 +25,7 @@ public:
 
     void setGradientActive(bool active, juce::Colour capColor = juce::Colours::grey);
     void setLocked(bool locked);
+    void setLinked(bool linked) { isLinkedState = linked; repaint(); }
 
     void setGradientMarkers(const std::vector<GradientMarker>& markers);
 
@@ -40,8 +42,10 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 
     bool allowGradientMode = true;
+    bool isSmall = false;
     bool isLockedState = false;
     bool isGradientSelected = false;
+    bool isLinkedState = false;
     juce::Colour activeCapColor { juce::Colour::fromRGB(180, 175, 160) };
 
     std::vector<GradientMarker> gradientMarkers;

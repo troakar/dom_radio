@@ -19,7 +19,13 @@ struct GradientPoint
     float amountPct = 100.0f;
     float upMaxDb = 4.0f;
     float downMaxDb = -12.0f;
-    float speedPct = 50.0f;
+    
+    bool useAutoSpeed = true;        // True = Speed mode, False = Attack/Release mode
+    float speedPct = 50.0f;          // Используется если useAutoSpeed = true
+    float attackMs = 5.0f;           // Используется если useAutoSpeed = false
+    float releaseMs = 150.0f;        // Используется если useAutoSpeed = false
+    float kneeWidthDb = 3.0f;        // Ширина колена компрессора
+    
     float smoothPct = 20.0f;
     float upSelectivity = 0.0f;
     float downSelectivity = 0.0f;

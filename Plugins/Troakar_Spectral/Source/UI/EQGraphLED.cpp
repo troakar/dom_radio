@@ -11,9 +11,9 @@ EQGraphLED::EQGraphLED(TroakarSpectralAudioProcessor& p)
     globalThreshSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
     globalThreshSlider.setPopupDisplayEnabled(true, true, nullptr);
     
-    globalThreshSlider.setRange(minDb, maxDb, 0.1);
+    globalThreshSlider.setRange(-48.0, 12.0, 0.1);
     globalThreshSlider.setValue(0.0, juce::dontSendNotification);
-    addAndMakeVisible(globalThreshSlider);
+    addAndMakeVisible(&globalThreshSlider);
 
     threshAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         processor.apvts, "GLOBAL_THRESH", globalThreshSlider);
@@ -28,7 +28,9 @@ EQGraphLED::EQGraphLED(TroakarSpectralAudioProcessor& p)
     }
     processor.apvts.addParameterListener("GLOBAL_THRESH", paramListener.get());
     processor.apvts.addParameterListener("FFT_MODE", paramListener.get());
+    processor.apvts.addParameterListener("VIEW_RANGE", paramListener.get());
     lastFFTMode = static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
+    updateViewRange(static_cast<int>(*processor.apvts.getRawParameterValue("VIEW_RANGE")));
 }
 
 EQGraphLED::~EQGraphLED()
@@ -43,6 +45,7 @@ EQGraphLED::~EQGraphLED()
         }
         processor.apvts.removeParameterListener("GLOBAL_THRESH", paramListener.get());
         processor.apvts.removeParameterListener("FFT_MODE", paramListener.get());
+        processor.apvts.removeParameterListener("VIEW_RANGE", paramListener.get());
     }
 }
 float EQGraphLED::freqToX(float f) const  { return std::log10(juce::jlimit(20.0f, 20000.0f, f) / 20.0f) / 3.0f * (float)getWidth(); }
@@ -68,8 +71,8 @@ void EQGraphLED::resized()
 {
     auto bounds = getLocalBounds();
     
-    float yTop = gainToY(maxDb);       // +6 dB (вверху)
-    float yBottom = gainToY(minDb);    // -36 dB (внизу)
+    float yTop = gainToY(maxDb);
+    float yBottom = gainToY(minDb);
     float trackHeight = yBottom - yTop;
     
     auto leftArea = bounds.removeFromLeft(28).reduced(4, 0);
@@ -86,6 +89,65 @@ void EQGraphLED::resized()
         freqPerPixel[x] = xToFreq((float)x);
 
     targetPathDirty = true;
+}
+
+void EQGraphLED::cycleViewRange(int direction)
+{
+    static const float depths[] = { 24.0f, 48.0f, 72.0f, 96.0f, 120.0f };
+    static const int numDepths = 5;
+
+    int currentIndex = 2;
+    float minDiff = 1000.0f;
+    for (int i = 0; i < numDepths; ++i)
+    {
+        float diff = std::abs(depths[i] - baseViewDepth);
+        if (diff < minDiff) { minDiff = diff; currentIndex = i; }
+    }
+
+    int newIndex = juce::jlimit(0, numDepths - 1, currentIndex + direction);
+
+    if (newIndex != currentIndex)
+    {
+        if (auto* rangeParam = processor.apvts.getParameter("VIEW_RANGE"))
+        {
+            float normalizedValue = static_cast<float>(newIndex) / static_cast<float>(numDepths - 1);
+            rangeParam->setValueNotifyingHost(normalizedValue);
+        }
+        
+        zoomIndicatorAlpha = 1.0f;
+    }
+}
+
+void EQGraphLED::updateViewRange(int rangeIndex)
+{
+    switch (rangeIndex)
+    {
+        case 0: baseViewDepth = 24.0f;  break;
+        case 1: baseViewDepth = 48.0f;  break;
+        case 2: baseViewDepth = 72.0f;  break;
+        case 3: baseViewDepth = 96.0f;  break;
+        case 4: baseViewDepth = 120.0f; break;
+        default: baseViewDepth = 96.0f; break;
+    }
+    
+    viewportOffset = 0.0f;
+    maxDb = 12.0f;
+    minDb = maxDb - baseViewDepth;
+    
+    backgroundCache = juce::Image();
+    repaint();
+}
+
+void EQGraphLED::updateViewportFollow(float /*currentThreshold*/)
+{
+    float targetMaxDb = 12.0f;
+    
+    if (std::abs(maxDb - targetMaxDb) > 0.01f || std::abs(minDb - (targetMaxDb - baseViewDepth)) > 0.01f)
+    {
+        maxDb = targetMaxDb;
+        minDb = maxDb - baseViewDepth;
+        backgroundCache = juce::Image();
+    }
 }
 
 void EQGraphLED::rebuildBackgroundCache()
@@ -114,12 +176,28 @@ void EQGraphLED::rebuildBackgroundCache()
         g.drawText(fText, (int)x - 20, (int)b.getBottom() - 16, 40, 14, juce::Justification::centredBottom);
     }
     
-    // Рисуем сетку от -36 до +6 с шагом 6 dB
-    for (int db = -36; db <= 6; db += 6)
+    float dbRange = maxDb - minDb;
+    float gridStep = (dbRange <= 24.0f) ? 6.0f : 12.0f;
+    
+    for (float db = std::ceil(minDb / gridStep) * gridStep; db <= maxDb; db += gridStep)
     {
-        float y = gainToY((float)db);
-        g.setColour(phosphor.withAlpha(db == 0 ? 0.20f : 0.05f));
+        float y = gainToY(db);
+        bool isZero = std::abs(db) < 0.1f;
+        g.setColour(phosphor.withAlpha(isZero ? 0.25f : 0.06f));
         g.drawHorizontalLine((int)y, 0.0f, b.getRight());
+        
+        if (isZero || std::abs(db - std::round(db / gridStep) * gridStep) < 0.1f)
+        {
+            g.setColour(phosphor.withAlpha(isZero ? 0.7f : 0.5f));
+            g.setFont(juce::FontOptions(isZero ? 10.0f : 9.0f, juce::Font::bold));
+            
+            juce::String label;
+            if (isZero) label = "0";
+            else if (db > 0.0f) label = "+" + juce::String((int)db);
+            else label = juce::String((int)db);
+
+            g.drawText(label, 5, (int)y - 6, 35, 12, juce::Justification::centredLeft);
+        }
     }
 
     auto grunge = RetroFX::createGrungeTexture(getWidth(), getHeight(), 2026, 0.003f);
@@ -240,22 +318,18 @@ void EQGraphLED::buildDeltaPaths()
 
     cachedUpFill.preallocateSpace(w + 10);
     cachedDownFill.preallocateSpace(w + 10);
-    cachedUpLine.preallocateSpace(w / 3 + 10);
-    cachedDownLine.preallocateSpace(w / 3 + 10);
+    cachedUpLine.preallocateSpace(w / 2 + 10);
+    cachedDownLine.preallocateSpace(w / 2 + 10);
 
-    float spatialSmoothedDelta = 0.0f;
-
-    for (int x = 0; x <= w; x += 3)
+    for (int x = 0; x <= w; x += 2)
     {
         double freq = freqPerPixel[x];
         float targetDb = targetDbPerPixel[x];
+        
         float rawDelta = getInterpolatedArray(processor.compressionDeltaData, freq, sr);
 
-        if (x == 0) spatialSmoothedDelta = rawDelta;
-        else spatialSmoothedDelta = spatialSmoothedDelta * 0.7f + rawDelta * 0.3f;
-
-        float upDeltaDb = std::max(0.0f, spatialSmoothedDelta);
-        float downDeltaDb = std::min(0.0f, spatialSmoothedDelta);
+        float upDeltaDb = std::max(0.0f, rawDelta);
+        float downDeltaDb = std::min(0.0f, rawDelta);
 
         float yTarget = juce::jlimit(3.0f, (float)getHeight() - 3.0f, gainToY(targetDb));
         float yUp = juce::jlimit(3.0f, (float)getHeight() - 3.0f, gainToY(targetDb + upDeltaDb));
@@ -274,7 +348,7 @@ void EQGraphLED::buildDeltaPaths()
         }
     }
 
-    for (int x = w; x >= 0; x -= 3) {
+    for (int x = w; x >= 0; x -= 2) {
         float yTarget = juce::jlimit(3.0f, (float)getHeight() - 3.0f, gainToY(targetDbPerPixel[x]));
         cachedUpFill.lineTo(x, yTarget);
         cachedDownFill.lineTo(x, yTarget);
@@ -326,7 +400,7 @@ float EQGraphLED::getTargetCurveDb(double freq) const
 float EQGraphLED::getInterpolatedArray(const std::atomic<float>* arr, double freq, double sr) const
 {
     const int fftSize = processor.getCurrentFFTSize();
-    const int maxBin = fftSize / 2 - 2;
+    const int maxBin = (fftSize / 2) - 2;
 
     float fBin = (float)(freq * (double)fftSize / sr);
     if (fBin < 1.0f) return arr[1].load(std::memory_order_relaxed);
@@ -424,7 +498,7 @@ void EQGraphLED::drawSpectrumFog(juce::Graphics& g, const juce::Rectangle<float>
             if (hasSidechainSignal) scCurveDb[x] = maxSc;
         } else {
             // Если бины шире пикселя (зона НЧ) — линейная интерполяция
-            const double binPos = centerFreq / binWidthHz;
+            const double binPos = juce::jmax(1.0, centerFreq / binWidthHz);
             int idx = juce::jlimit(1, numBins - 2, static_cast<int>(std::floor(binPos)));
             float frac = static_cast<float>(binPos - idx);
 
@@ -481,13 +555,13 @@ void EQGraphLED::drawSpectrumFog(juce::Graphics& g, const juce::Rectangle<float>
         fillPath.lineTo(0.0f, bounds.getBottom());
         fillPath.closeSubPath();
 
-        juce::ColourGradient fillGrad(phosphor.withAlpha(0.06f), 0.0f, gainToY(maxDb),
+        juce::ColourGradient fillGrad(phosphor.withAlpha(0.45f), 0.0f, bounds.getY() + bounds.getHeight() * 0.15f,
                                       phosphor.withAlpha(0.0f),  0.0f, bounds.getBottom(), false);
         g.setGradientFill(fillGrad);
         g.fillPath(fillPath);
 
-        g.setColour(phosphor.withAlpha(0.40f));
-        g.strokePath(cachedSpecPath, juce::PathStrokeType(1.1f));
+        g.setColour(phosphor.withAlpha(0.85f));
+        g.strokePath(cachedSpecPath, juce::PathStrokeType(1.5f));
     }
 
     // Отрисовка Sidechain Spectrum
@@ -526,6 +600,24 @@ void EQGraphLED::paint(juce::Graphics& g)
     g.drawText("THRESHOLD " + juce::String(globalThresh, 1) + " dB",
                10, static_cast<int>(threshY) - 15, 150, 12,
                juce::Justification::centredLeft);
+
+    if (zoomIndicatorAlpha > 0.01f)
+    {
+        juce::String zoomText = juce::String((int)baseViewDepth) + " dB VIEW";
+        
+        g.setColour(juce::Colour::fromRGB(255, 176, 40).withAlpha(zoomIndicatorAlpha * 0.9f));
+        g.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+        
+        auto textBounds = bounds.withSizeKeepingCentre(150.0f, 30.0f).withY(bounds.getY() + 10.0f);
+        
+        g.setColour(juce::Colour::fromRGB(20, 18, 15).withAlpha(zoomIndicatorAlpha * 0.8f));
+        g.fillRoundedRectangle(textBounds, 4.0f);
+        
+        g.setColour(juce::Colour::fromRGB(255, 176, 40).withAlpha(zoomIndicatorAlpha));
+        g.drawText(zoomText, textBounds, juce::Justification::centred);
+        
+        zoomIndicatorAlpha *= 0.92f;
+    }
 
     float avgGain = 0.0f;
     int validBins = 0;
@@ -758,7 +850,7 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
                 if (result == 1)
                 {
                     const float newFreq = juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
-                    const float newGain = juce::jlimit(minDb, maxDb, yToGain(e.position.y) - globalThresh);
+                    const float newGain = juce::jlimit(-60.0f, 60.0f, yToGain(e.position.y) - globalThresh);
 
                     const int newId = gradientManager.addPoint(newFreq, newGain);
                     if (newId >= 0)
@@ -835,7 +927,7 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
         const float newFreq = 
             juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
         const float newGain = 
-            juce::jlimit(minDb, maxDb, yToGain(e.position.y) - globalThresh);
+            juce::jlimit(-60.0f, 60.0f, yToGain(e.position.y) - globalThresh);
 
         createEQBandAt(newFreq, newGain);
         repaint();
@@ -895,7 +987,7 @@ void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
     const float newFreq = 
         juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
     const float newGain = 
-        juce::jlimit(minDb, maxDb, yToGain(e.position.y) - globalThresh);
+        juce::jlimit(-60.0f, 60.0f, yToGain(e.position.y) - globalThresh);
 
     createEQBandAt(newFreq, newGain);
     repaint();
@@ -957,7 +1049,7 @@ void EQGraphLED::mouseDrag(const juce::MouseEvent& e)
         if (gp)
         {
             float newFreq = juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
-            float newGain = juce::jlimit(minDb, maxDb, yToGain(e.position.y) - globalThresh);
+            float newGain = juce::jlimit(-60.0f, 60.0f, yToGain(e.position.y) - globalThresh);
 
             gp->centerFreqHz = newFreq;
             gp->centerGainDb = newGain;
@@ -983,7 +1075,7 @@ void EQGraphLED::mouseDrag(const juce::MouseEvent& e)
     const float newFreq = juce::jlimit(20.0f, 20000.0f, dragStartFreq * freqRatio);
 
     const float gainDelta = -(deltaY * (maxDb - minDb)) / ((float)getHeight() * 0.84f);
-    const float newGain = juce::jlimit(minDb, maxDb, dragStartGain + gainDelta);
+    const float newGain = juce::jlimit(-60.0f, 60.0f, dragStartGain + gainDelta);
 
     juce::String prefix = "BAND_" + juce::String(draggingNode);
     auto* fParam = processor.apvts.getParameter(prefix + "_FREQ");
@@ -997,6 +1089,13 @@ void EQGraphLED::mouseDrag(const juce::MouseEvent& e)
 
 void EQGraphLED::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
+    if (e.mods.isCtrlDown())
+    {
+        int direction = (wheel.deltaY > 0.0f) ? -1 : 1;
+        cycleViewRange(direction);
+        return;
+    }
+
     float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
 
     for (auto& gp : gradientManager.points)

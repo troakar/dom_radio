@@ -23,6 +23,13 @@ TroakarSpectralAudioProcessor::TroakarSpectralAudioProcessor()
     pDownSel   = apvts.getRawParameterValue("DOWN_SEL");
     pFftMode   = apvts.getRawParameterValue("FFT_MODE");
     pDeltaMode = apvts.getRawParameterValue("DELTA_MODE");
+    pViewRange = apvts.getRawParameterValue("VIEW_RANGE");
+
+    pSpeedAuto = apvts.getRawParameterValue("SPEED_AUTO");
+    pAttackMs = apvts.getRawParameterValue("ATTACK_MS");
+    pReleaseMs = apvts.getRawParameterValue("RELEASE_MS");
+    pKneeWidth = apvts.getRawParameterValue("KNEE_WIDTH");
+    pLookaheadMs = apvts.getRawParameterValue("LOOKAHEAD_MS");
 
     for (int i = 0; i < 4; ++i) {
         juce::String prefix = "GRADIENT_" + juce::String(i);
@@ -37,6 +44,10 @@ TroakarSpectralAudioProcessor::TroakarSpectralAudioProcessor()
         pGradSmooth[i]  = apvts.getRawParameterValue(prefix + "_SMOOTH");
         pGradUpSel[i]   = apvts.getRawParameterValue(prefix + "_UP_SEL");
         pGradDownSel[i] = apvts.getRawParameterValue(prefix + "_DOWN_SEL");
+        pGradAutoSpeed[i] = apvts.getRawParameterValue(prefix + "_AUTO_SPEED");
+        pGradAttack[i]   = apvts.getRawParameterValue(prefix + "_ATTACK");
+        pGradRelease[i]  = apvts.getRawParameterValue(prefix + "_RELEASE");
+        pGradKnee[i]     = apvts.getRawParameterValue(prefix + "_KNEE");
     }
 
     for (int i = 0; i < 8; ++i) {
@@ -115,19 +126,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
         juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 100.0f, 
         FloatAttr().withStringFromValueFunction(pctFormat)));
 
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        "IO_LINK", "In/Out Gain Link", false));
+
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "AMOUNT", "Comp Amount", 
-        juce::NormalisableRange<float>(0.0f, 150.0f, 1.0f), 0.0f, 
+        juce::NormalisableRange<float>(0.0f, 300.0f, 1.0f, 0.65f), 100.0f,
         FloatAttr().withStringFromValueFunction(pctFormat)));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "GLOBAL_THRESH", "Threshold", 
-        juce::NormalisableRange<float>(-36.0f, 6.0f, 0.1f), 0.0f, 
+        juce::NormalisableRange<float>(-48.0f, 12.0f, 0.1f), 0.0f, 
         FloatAttr().withStringFromValueFunction(dbFormat)));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "UPWARD_RANGE", "Max Upward Gain", 
-        juce::NormalisableRange<float>(0.0f, 24.0f, 0.1f), 4.0f, 
+        juce::NormalisableRange<float>(0.0f, 48.0f, 0.1f, 0.70f), 4.0f,
         FloatAttr().withStringFromValueFunction(dbFormat)));
     
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -171,7 +185,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             idPrefix + "_GAIN", namePrefix + " Gain", 
-            juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f, 
+            juce::NormalisableRange<float>(-60.0f, 60.0f, 0.1f), 0.0f, 
             FloatAttr().withStringFromValueFunction(dbFormat)));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -196,7 +210,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             idPrefix + "_CENTER_GAIN", namePrefix + " Center Gain (Thresh Offset)",
-            juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f,
+            juce::NormalisableRange<float>(-60.0f, 60.0f, 0.1f), 0.0f,
             FloatAttr().withStringFromValueFunction(dbFormat)));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -206,12 +220,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             idPrefix + "_AMOUNT", namePrefix + " Amount",
-            juce::NormalisableRange<float>(0.0f, 150.0f, 1.0f), 100.0f,
+            juce::NormalisableRange<float>(0.0f, 300.0f, 1.0f, 0.65f), 100.0f,
             FloatAttr().withStringFromValueFunction(pctFormat)));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             idPrefix + "_UP_MAX", namePrefix + " Up Max",
-            juce::NormalisableRange<float>(0.0f, 24.0f, 0.1f), 4.0f,
+            juce::NormalisableRange<float>(0.0f, 48.0f, 0.1f, 0.70f), 4.0f,
             FloatAttr().withStringFromValueFunction(dbFormat)));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -247,6 +261,78 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         "DELTA_MODE", "Delta Listen", false));
 
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        "VIEW_RANGE", "View Depth",
+        juce::StringArray {
+            "24 dB (Mastering)",
+            "48 dB (Mixing)",
+            "72 dB (Deep)",
+            "96 dB (Full Spectrum)",
+            "120 dB (Extended)"
+        },
+        3));
+
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        "SPEED_AUTO", "Speed Auto Mode", true));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "ATTACK_MS", "Attack Time",
+        juce::NormalisableRange<float>(0.1f, 100.0f, 0.1f, 0.3f), 5.0f,
+        FloatAttr().withStringFromValueFunction([](float v, int) { 
+            return juce::String(v, 1) + " ms"; 
+        })));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "RELEASE_MS", "Release Time",
+        juce::NormalisableRange<float>(10.0f, 1000.0f, 1.0f, 0.3f), 150.0f,
+        FloatAttr().withStringFromValueFunction([](float v, int) { 
+            return juce::String((int)v) + " ms"; 
+        })));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "KNEE_WIDTH", "Knee Width",
+        juce::NormalisableRange<float>(0.0f, 12.0f, 0.1f), 3.0f,
+        FloatAttr().withStringFromValueFunction([](float v, int) { 
+            return juce::String(v, 1) + " dB"; 
+        })));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "LOOKAHEAD_MS", "Look-Ahead",
+        juce::NormalisableRange<float>(0.0f, 10.0f, 0.1f), 5.0f,
+        FloatAttr().withStringFromValueFunction([](float v, int) { 
+            return juce::String(v, 1) + " ms"; 
+        })));
+
+    for (int g = 0; g < 4; ++g)
+    {
+        juce::String idPrefix = "GRADIENT_" + juce::String(g);
+        juce::String namePrefix = "Gradient " + juce::String(g + 1);
+
+        params.push_back(std::make_unique<juce::AudioParameterBool>(
+            idPrefix + "_AUTO_SPEED", namePrefix + " Auto Speed", true));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_ATTACK", namePrefix + " Attack",
+            juce::NormalisableRange<float>(0.1f, 100.0f, 0.1f, 0.3f), 5.0f,
+            FloatAttr().withStringFromValueFunction([](float v, int) { 
+                return juce::String(v, 1) + " ms"; 
+            })));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_RELEASE", namePrefix + " Release",
+            juce::NormalisableRange<float>(10.0f, 1000.0f, 1.0f, 0.3f), 150.0f,
+            FloatAttr().withStringFromValueFunction([](float v, int) { 
+                return juce::String((int)v) + " ms"; 
+            })));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_KNEE", namePrefix + " Knee",
+            juce::NormalisableRange<float>(0.0f, 12.0f, 0.1f), 3.0f,
+            FloatAttr().withStringFromValueFunction([](float v, int) { 
+                return juce::String(v, 1) + " dB"; 
+            })));
+    }
+
     return { params.begin(), params.end() };
 }
 
@@ -261,20 +347,31 @@ void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int sample
         sidechainData[i].store(-100.0f, std::memory_order_relaxed);
     }
 
-    dryDelayBuffer.setSize(2, 8192);
-    dryDelayBuffer.clear();
-    dryDelayIndex = 0;
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate = sampleRate;
+    spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
+    spec.numChannels = 2;
+    dryDelay.prepare(spec);
+    dryDelay.setDelay(currentFFTSize);
 
     delayedDryBuffer.setSize(2, MAX_BLOCK_SIZE);
     delayedDryBuffer.clear();
 
-    audioThreadGradients.resize(4);
     smoothedMix.reset(sampleRate, 0.04);
 
-    setLatencySamples(currentFFTSize);
+    setLatencySamples(currentFFTSize + spectralEngine.getLookaheadSamples());
 }
 
 void TroakarSpectralAudioProcessor::releaseResources() {}
+
+void TroakarSpectralAudioProcessor::handleAsyncUpdate()
+{
+    if (requiresLatencyUpdate.exchange(false))
+    {
+        setLatencySamples(currentFFTSize + spectralEngine.getLookaheadSamples());
+        updateHostDisplay();
+    }
+}
 
 void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
@@ -296,16 +393,12 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     for (int ch = 0; ch < mainChannels; ++ch) {
         const float* rawIn = mainBus.getReadPointer(ch);
         float* dryOut = delayedDryBuffer.getWritePointer(ch);
-        float* delayData = dryDelayBuffer.getWritePointer(ch);
 
-        int tempIndex = dryDelayIndex;
         for (int i = 0; i < numSamples; ++i) {
-            dryOut[i] = delayData[tempIndex];
-            delayData[tempIndex] = rawIn[i];
-            if (++tempIndex >= currentFFTSize) tempIndex = 0;
+            dryDelay.pushSample(ch, rawIn[i]);
+            dryOut[i] = dryDelay.popSample(ch);
         }
     }
-    dryDelayIndex = (dryDelayIndex + numSamples) % currentFFTSize;
 
     float inGainDb = *pInGain;
     const float inGainLin = juce::Decibels::decibelsToGain(inGainDb);
@@ -329,6 +422,12 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float upSel   = *pUpSel;
     float downSel = *pDownSel;
 
+    float attackMs  = *pAttackMs;
+    float releaseMs = *pReleaseMs;
+    float speedAuto = *pSpeedAuto;
+    float kneeWidth = *pKneeWidth;
+    float lookahead = *pLookaheadMs;
+
     bool engineDirty = false;
 
     int fftMode = static_cast<int>(*pFftMode);
@@ -336,7 +435,7 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
         prevFFTMode = fftMode;
         currentFFTSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
         spectralEngine.switchFFTSize(currentFFTSize);
-        setLatencySamples(currentFFTSize);
+        dryDelay.setDelay(currentFFTSize); 
 
         for (int i = 0; i < MAX_FFT_BINS; ++i) {
             spectrumDataLeft[i].store(-100.0f, std::memory_order_relaxed);
@@ -346,21 +445,29 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
 
         engineDirty = true;
         spectralEngine.invalidateTarget();
-        updateHostDisplay();
+
+        requiresLatencyUpdate.store(true);
+        triggerAsyncUpdate();
     }
 
     engineDirty |= syncGradientPointsFromAPVTS();
 
     if (upMax != prevUpMax || downMax != prevDownMax || amount != prevAmount || 
-        speed != prevSpeed || smooth != prevSmooth || upSel != prevUpSel || downSel != prevDownSel) 
+        speed != prevSpeed || smooth != prevSmooth || upSel != prevUpSel || downSel != prevDownSel ||
+        attackMs != prevAttackMs || releaseMs != prevReleaseMs || speedAuto != prevSpeedAuto ||
+        kneeWidth != prevKneeWidth || lookahead != prevLookaheadMs) 
     {
         engineDirty = true;
         prevUpMax = upMax; prevDownMax = downMax; prevAmount = amount;
         prevSpeed = speed; prevSmooth = smooth; prevUpSel = upSel; prevDownSel = downSel;
+        prevAttackMs = attackMs; prevReleaseMs = releaseMs; prevSpeedAuto = speedAuto;
+        prevKneeWidth = kneeWidth; prevLookaheadMs = lookahead;
     }
 
     if (engineDirty) {
-        spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, upSel, downSel, audioThreadGradients, getSampleRate());
+        spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, upSel, downSel,
+            *pSpeedAuto > 0.5f, *pAttackMs, *pReleaseMs, *pKneeWidth, *pLookaheadMs,
+            audioThreadGradients, getSampleRate());
     }
 
     spectralEngine.process(mainBus, hasSidechain ? &sidechainBus : nullptr, *pThresh, spectrumDataLeft, compressionDeltaData, sidechainData);
@@ -463,6 +570,11 @@ void TroakarSpectralAudioProcessor::setStateInformation (const void* data, int s
                 pt.upSelectivity   = *apvts.getRawParameterValue(prefix + "_UP_SEL");
                 pt.downSelectivity = *apvts.getRawParameterValue(prefix + "_DOWN_SEL");
                 
+                pt.useAutoSpeed    = *apvts.getRawParameterValue(prefix + "_AUTO_SPEED") > 0.5f;
+                pt.attackMs        = *apvts.getRawParameterValue(prefix + "_ATTACK");
+                pt.releaseMs       = *apvts.getRawParameterValue(prefix + "_RELEASE");
+                pt.kneeWidthDb     = *apvts.getRawParameterValue(prefix + "_KNEE");
+                
                 gradientManager.points.push_back(pt);
             }
         }
@@ -474,7 +586,7 @@ void TroakarSpectralAudioProcessor::setStateInformation (const void* data, int s
 bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
 {
     bool changed = false;
-    for (size_t i = 0; i < audioThreadGradients.size() && i < 4; ++i)
+    for (size_t i = 0; i < 4; ++i)
     {
         auto& point = audioThreadGradients[i];
 
@@ -489,12 +601,18 @@ bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
         float sm     = *pGradSmooth[i];
         float upSel  = *pGradUpSel[i];
         float dnSel  = *pGradDownSel[i];
+        bool  autoSpd = *pGradAutoSpeed[i] > 0.5f;
+        float atk     = *pGradAttack[i];
+        float rel     = *pGradRelease[i];
+        float knee    = *pGradKnee[i];
 
         if (point.active != active || point.centerFreqHz != freq || point.centerGainDb != gain ||
             point.radiusOctaves != bw || point.amountPct != amt ||
             point.upMaxDb != up || point.downMaxDb != dn ||
             point.speedPct != spd || point.smoothPct != sm ||
-            point.upSelectivity != upSel || point.downSelectivity != dnSel) 
+            point.upSelectivity != upSel || point.downSelectivity != dnSel ||
+            point.useAutoSpeed != autoSpd || point.attackMs != atk || 
+            point.releaseMs != rel || point.kneeWidthDb != knee) 
         {
             changed = true;
             point.active = active;
@@ -508,6 +626,10 @@ bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
             point.smoothPct = sm;
             point.upSelectivity = upSel;
             point.downSelectivity = dnSel;
+            point.useAutoSpeed = autoSpd;
+            point.attackMs = atk;
+            point.releaseMs = rel;
+            point.kneeWidthDb = knee;
         }
     }
     return changed;
@@ -535,6 +657,10 @@ void TroakarSpectralAudioProcessor::syncGradientPointsToAPVTS()
             auto* smoothParam = apvts.getParameter(prefix + "_SMOOTH");
             auto* upSelParam  = apvts.getParameter(prefix + "_UP_SEL");
             auto* dnSelParam  = apvts.getParameter(prefix + "_DOWN_SEL");
+            auto* autoSpeedParam = apvts.getParameter(prefix + "_AUTO_SPEED");
+            auto* attackParam    = apvts.getParameter(prefix + "_ATTACK");
+            auto* releaseParam   = apvts.getParameter(prefix + "_RELEASE");
+            auto* kneeParam      = apvts.getParameter(prefix + "_KNEE");
 
             enableParam->setValueNotifyingHost(1.0f);
             freqParam->setValueNotifyingHost(freqParam->convertTo0to1(point.centerFreqHz));
@@ -547,6 +673,11 @@ void TroakarSpectralAudioProcessor::syncGradientPointsToAPVTS()
             smoothParam->setValueNotifyingHost(smoothParam->convertTo0to1(point.smoothPct));
             upSelParam->setValueNotifyingHost(upSelParam->convertTo0to1(point.upSelectivity));
             dnSelParam->setValueNotifyingHost(dnSelParam->convertTo0to1(point.downSelectivity));
+            
+            autoSpeedParam->setValueNotifyingHost(point.useAutoSpeed ? 1.0f : 0.0f);
+            attackParam->setValueNotifyingHost(attackParam->convertTo0to1(point.attackMs));
+            releaseParam->setValueNotifyingHost(releaseParam->convertTo0to1(point.releaseMs));
+            kneeParam->setValueNotifyingHost(kneeParam->convertTo0to1(point.kneeWidthDb));
         }
         else
         {

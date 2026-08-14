@@ -13,18 +13,15 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
         updateKnobStates(); 
         eqGraph.repaint();
     };
-
     gradientOverlay->onPointDeleted = [this](int) {
         audioProcessor.syncGradientPointsToAPVTS();
         updateKnobStates();
         eqGraph.repaint();
     };
-
     eqGraph.onGradientSelectionChanged = [this]() {
         updateKnobStates();
         gradientOverlay->repaint();
     };
-
     eqGraph.onGradientParamsChanged = [this]() {
         audioProcessor.syncGradientPointsToAPVTS();
         updateKnobStates(); 
@@ -37,6 +34,13 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     addAndMakeVisible(fftComboBox);
     fftAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "FFT_MODE", fftComboBox);
 
+    viewRangeComboBox.addItemList({"24dB", "48dB", "72dB", "96dB", "120dB"}, 1);
+    viewRangeComboBox.setJustificationType(juce::Justification::centred);
+    viewRangeComboBox.setColour(juce::ComboBox::backgroundColourId, juce::Colour::fromRGB(24, 22, 18));
+    addAndMakeVisible(viewRangeComboBox);
+    viewRangeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.apvts, "VIEW_RANGE", viewRangeComboBox);
+
     deltaButton.setButtonText("DELTA");
     deltaButton.setClickingTogglesState(true);
     deltaButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(35, 30, 25));
@@ -48,14 +52,89 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     outLvlKnob  = std::make_unique<GradientKnob>(audioProcessor.apvts, "OUT_LVL",  "OUT LVL",  false);
     mixKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "MIX",      "MIX",      false);
 
+    linkButton.setButtonText("LINK");
+    linkButton.setClickingTogglesState(true);
+    linkButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(35, 30, 25));
+    linkButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(100, 200, 255));
+    linkButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(120, 115, 100));
+    linkButton.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
+    linkButton.setTooltip("Link In/Out Gain");
+    addAndMakeVisible(linkButton);
+
+    linkAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "IO_LINK", linkButton);
+
+    lastInGainValue = inGainKnob->slider.getValue();
+    lastOutLvlValue = outLvlKnob->slider.getValue();
+
+    inGainKnob->slider.onValueChange = [this]() {
+        const double currentIn = inGainKnob->slider.getValue();
+        if (linkButton.getToggleState() && !isUpdatingLink) {
+            isUpdatingLink = true;
+            double newOutValue = juce::jlimit(-24.0, 24.0, outLvlKnob->slider.getValue() - (currentIn - lastInGainValue));
+            outLvlKnob->slider.setValue(newOutValue, juce::sendNotificationSync);
+            lastOutLvlValue = newOutValue;
+            isUpdatingLink = false;
+        }
+        lastInGainValue = currentIn;
+    };
+
+    outLvlKnob->slider.onValueChange = [this]() {
+        const double currentOut = outLvlKnob->slider.getValue();
+        if (linkButton.getToggleState() && !isUpdatingLink) {
+            isUpdatingLink = true;
+            double newInValue = juce::jlimit(-24.0, 24.0, inGainKnob->slider.getValue() - (currentOut - lastOutLvlValue));
+            inGainKnob->slider.setValue(newInValue, juce::sendNotificationSync);
+            lastInGainValue = newInValue;
+            isUpdatingLink = false;
+        }
+        lastOutLvlValue = currentOut;
+    };
+
+    linkButton.onClick = [this]() {
+        bool linked = linkButton.getToggleState();
+        inGainKnob->setLinked(linked);
+        outLvlKnob->setLinked(linked);
+        if (linked) {
+            lastInGainValue = inGainKnob->slider.getValue();
+            lastOutLvlValue = outLvlKnob->slider.getValue();
+        }
+    };
+
     amountKnob    = std::make_unique<GradientKnob>(audioProcessor.apvts, "AMOUNT",         "AMOUNT",    true);
     upRangeKnob   = std::make_unique<GradientKnob>(audioProcessor.apvts, "UPWARD_RANGE",   "UP MAX",    true);
     downRangeKnob = std::make_unique<GradientKnob>(audioProcessor.apvts, "DOWNWARD_RANGE", "DOWN MAX",  true);
     speedKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "SPECTRAL_SPEED", "SPEED",     true);
     smoothKnob    = std::make_unique<GradientKnob>(audioProcessor.apvts, "SMOOTHING",      "SMOOTH",    true);
-    upSelKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "UP_SEL",         "UP SEL",    true);
-    downSelKnob   = std::make_unique<GradientKnob>(audioProcessor.apvts, "DOWN_SEL",       "DOWN SEL",  true);
+    upSelKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "UP_SEL",         "UP SEL",    true, true);
+    downSelKnob   = std::make_unique<GradientKnob>(audioProcessor.apvts, "DOWN_SEL",       "DOWN SEL",  true, true);
 
+    speedAutoButton.setButtonText("A");
+    speedAutoButton.setClickingTogglesState(true);
+    speedAutoButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(35, 30, 25));
+    speedAutoButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(255, 176, 40));
+    speedAutoButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(120, 115, 100));
+    speedAutoButton.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
+    addAndMakeVisible(speedAutoButton);
+
+    attackKnob    = std::make_unique<GradientKnob>(audioProcessor.apvts, "ATTACK_MS",   "ATTACK",  true);
+    releaseKnob   = std::make_unique<GradientKnob>(audioProcessor.apvts, "RELEASE_MS",  "RELEASE", true);
+    kneeKnob      = std::make_unique<GradientKnob>(audioProcessor.apvts, "KNEE_WIDTH",  "KNEE",    true);
+    lookaheadKnob = std::make_unique<GradientKnob>(audioProcessor.apvts, "LOOKAHEAD_MS", "LOOK-AHD", false);
+
+    speedAutoButton.onClick = [this]() { 
+        updateDynamicsKnobsVisibility(); 
+        resized();
+        repaint();
+    };
+
+    speedAutoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.apvts, "SPEED_AUTO", speedAutoButton);
+
+    addAndMakeVisible(attackKnob.get());
+    addAndMakeVisible(releaseKnob.get());
+    addAndMakeVisible(kneeKnob.get());
+    addAndMakeVisible(lookaheadKnob.get());
+    
     addAndMakeVisible(inGainKnob.get());
     addAndMakeVisible(outLvlKnob.get());
     addAndMakeVisible(mixKnob.get());
@@ -67,8 +146,9 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     addAndMakeVisible(upSelKnob.get());
     addAndMakeVisible(downSelKnob.get());
 
+    updateDynamicsKnobsVisibility();
     updateKnobStates();
-    setSize (960, 620);
+    setSize (1024, 720);
 }
 
 TroakarSpectralAudioProcessorEditor::~TroakarSpectralAudioProcessorEditor()
@@ -76,11 +156,24 @@ TroakarSpectralAudioProcessorEditor::~TroakarSpectralAudioProcessorEditor()
     setLookAndFeel(nullptr);
 }
 
+void TroakarSpectralAudioProcessorEditor::updateDynamicsKnobsVisibility()
+{
+    bool isAutoMode = speedAutoButton.getToggleState();
+    
+    speedKnob->setVisible(isAutoMode);
+    attackKnob->setVisible(!isAutoMode);
+    releaseKnob->setVisible(!isAutoMode);
+    kneeKnob->setVisible(!isAutoMode);
+    lookaheadKnob->setVisible(true);
+}
+
 void TroakarSpectralAudioProcessorEditor::updateKnobStates()
 {
     bool isGradientMode = gradientManager.hasActivePoint();
     auto* point = gradientManager.getActivePoint();
-    juce::Colour currentCapColor = isGradientMode ? point->color : juce::Colour::fromRGB(180, 175, 160);
+    juce::Colour currentCapColor = (isGradientMode && point != nullptr) 
+                                   ? point->color 
+                                   : juce::Colour::fromRGB(180, 175, 160);
 
     inGainKnob->setGradientActive(false, currentCapColor);
     outLvlKnob->setGradientActive(false, currentCapColor);
@@ -89,83 +182,191 @@ void TroakarSpectralAudioProcessorEditor::updateKnobStates()
     amountKnob->setGradientActive(isGradientMode, currentCapColor);
     upRangeKnob->setGradientActive(isGradientMode, currentCapColor);
     downRangeKnob->setGradientActive(isGradientMode, currentCapColor);
-    speedKnob->setGradientActive(isGradientMode, currentCapColor);
     smoothKnob->setGradientActive(isGradientMode, currentCapColor);
     upSelKnob->setGradientActive(isGradientMode, currentCapColor);
     downSelKnob->setGradientActive(isGradientMode, currentCapColor);
 
-    if (isGradientMode)
+    bool isAutoMode = speedAutoButton.getToggleState();
+    
+    if (isAutoMode) {
+        speedKnob->setGradientActive(isGradientMode, currentCapColor);
+    } else {
+        attackKnob->setGradientActive(isGradientMode, currentCapColor);
+        releaseKnob->setGradientActive(isGradientMode, currentCapColor);
+        kneeKnob->setGradientActive(isGradientMode, currentCapColor);
+    }
+    
+    lookaheadKnob->setGradientActive(false, currentCapColor);
+
+    if (isGradientMode && point != nullptr)
     {
         juce::String prefix = "GRADIENT_" + juce::String(point->id);
+        
         amountKnob->bindToParameter(audioProcessor.apvts, prefix + "_AMOUNT");
         upRangeKnob->bindToParameter(audioProcessor.apvts, prefix + "_UP_MAX");
         downRangeKnob->bindToParameter(audioProcessor.apvts, prefix + "_DOWN_MAX");
-        speedKnob->bindToParameter(audioProcessor.apvts, prefix + "_SPEED");
         smoothKnob->bindToParameter(audioProcessor.apvts, prefix + "_SMOOTH");
         upSelKnob->bindToParameter(audioProcessor.apvts, prefix + "_UP_SEL");
         downSelKnob->bindToParameter(audioProcessor.apvts, prefix + "_DOWN_SEL");
+        
+        if (isAutoMode) {
+            speedKnob->bindToParameter(audioProcessor.apvts, prefix + "_SPEED");
+        } else {
+            attackKnob->bindToParameter(audioProcessor.apvts, prefix + "_ATTACK");
+            releaseKnob->bindToParameter(audioProcessor.apvts, prefix + "_RELEASE");
+            kneeKnob->bindToParameter(audioProcessor.apvts, prefix + "_KNEE");
+        }
     }
     else
     {
         amountKnob->bindToParameter(audioProcessor.apvts, "AMOUNT");
         upRangeKnob->bindToParameter(audioProcessor.apvts, "UPWARD_RANGE");
         downRangeKnob->bindToParameter(audioProcessor.apvts, "DOWNWARD_RANGE");
-        speedKnob->bindToParameter(audioProcessor.apvts, "SPECTRAL_SPEED");
         smoothKnob->bindToParameter(audioProcessor.apvts, "SMOOTHING");
         upSelKnob->bindToParameter(audioProcessor.apvts, "UP_SEL");
         downSelKnob->bindToParameter(audioProcessor.apvts, "DOWN_SEL");
-
-        std::vector<GradientKnob::GradientMarker> amountMarkers, upMarkers, downMarkers, speedMarkers, smoothMarkers, upSelMarkers, downSelMarkers;
-        for (const auto& p : gradientManager.points) {
-            amountMarkers.push_back({ p.id, p.amountPct / 150.0f, p.color });
-            upMarkers.push_back    ({ p.id, p.upMaxDb / 24.0f,    p.color });
-            downMarkers.push_back  ({ p.id, (-p.downMaxDb) / 24.0f, p.color });
-            speedMarkers.push_back ({ p.id, p.speedPct / 100.0f,  p.color });
-            smoothMarkers.push_back({ p.id, p.smoothPct / 100.0f, p.color });
-            upSelMarkers.push_back ({ p.id, (p.upSelectivity + 100.0f) / 200.0f, p.color });
-            downSelMarkers.push_back({p.id, (p.downSelectivity + 100.0f) / 200.0f, p.color });
+        
+        if (isAutoMode) {
+            speedKnob->bindToParameter(audioProcessor.apvts, "SPECTRAL_SPEED");
+        } else {
+            attackKnob->bindToParameter(audioProcessor.apvts, "ATTACK_MS");
+            releaseKnob->bindToParameter(audioProcessor.apvts, "RELEASE_MS");
+            kneeKnob->bindToParameter(audioProcessor.apvts, "KNEE_WIDTH");
         }
+
+        std::vector<GradientKnob::GradientMarker> amountMarkers, upMarkers, downMarkers, smoothMarkers, upSelMarkers, downSelMarkers;
+        std::vector<GradientKnob::GradientMarker> speedMarkers, attackMarkers, releaseMarkers, kneeMarkers;
+        
+        for (const auto& p : gradientManager.points) {
+            amountMarkers.push_back({ p.id, p.amountPct / 300.0f, p.color });
+            upMarkers.push_back({ p.id, p.upMaxDb / 48.0f, p.color });
+            downMarkers.push_back({ p.id, (-p.downMaxDb) / 24.0f, p.color });
+            smoothMarkers.push_back({ p.id, p.smoothPct / 100.0f, p.color });
+            upSelMarkers.push_back({ p.id, (p.upSelectivity + 100.0f) / 200.0f, p.color });
+            downSelMarkers.push_back({ p.id, (p.downSelectivity + 100.0f) / 200.0f, p.color });
+            
+            if (p.useAutoSpeed) {
+                speedMarkers.push_back({ p.id, p.speedPct / 100.0f, p.color });
+            } else {
+                attackMarkers.push_back({ p.id, (p.attackMs - 0.1f) / (100.0f - 0.1f), p.color });
+                releaseMarkers.push_back({ p.id, (p.releaseMs - 10.0f) / (1000.0f - 10.0f), p.color });
+                kneeMarkers.push_back({ p.id, p.kneeWidthDb / 12.0f, p.color });
+            }
+        }
+        
         amountKnob->setGradientMarkers(amountMarkers);
         upRangeKnob->setGradientMarkers(upMarkers);
         downRangeKnob->setGradientMarkers(downMarkers);
-        speedKnob->setGradientMarkers(speedMarkers);
         smoothKnob->setGradientMarkers(smoothMarkers);
         upSelKnob->setGradientMarkers(upSelMarkers);
         downSelKnob->setGradientMarkers(downSelMarkers);
+        
+        if (isAutoMode) {
+            speedKnob->setGradientMarkers(speedMarkers);
+        } else {
+            attackKnob->setGradientMarkers(attackMarkers);
+            releaseKnob->setGradientMarkers(releaseMarkers);
+            kneeKnob->setGradientMarkers(kneeMarkers);
+        }
     }
 }
 
 void TroakarSpectralAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour::fromRGB(24, 22, 18));
+    g.fillAll (juce::Colour::fromRGB(18, 16, 14));
+
+    auto bounds = getLocalBounds();
+    
+    auto topPanel = bounds.removeFromTop(44);
+    g.setColour(juce::Colour::fromRGB(24, 22, 18));
+    g.fillRect(topPanel);
+    g.setColour(juce::Colour::fromRGB(45, 40, 32));
+    g.drawRect(topPanel, 1.0f);
+
+    g.setColour(juce::Colour::fromRGB(255, 176, 40));
+    g.setFont(juce::FontOptions(18.0f, juce::Font::bold));
+    g.drawText("TROAKAR SPECTRAL", topPanel.removeFromLeft(200).withTrimmedLeft(16), juce::Justification::centredLeft);
+
+    g.setColour(juce::Colour::fromRGB(120, 115, 100));
+    g.setFont(juce::FontOptions(11.0f, juce::Font::italic));
+    g.drawText("SURGICAL SPECTRAL DYNAMICS", topPanel.removeFromLeft(200), juce::Justification::centredLeft);
+
+    auto leftPanel = bounds.removeFromLeft(90);
+    g.setColour(juce::Colour::fromRGB(20, 18, 15));
+    g.fillRect(leftPanel);
+    g.setColour(juce::Colour::fromRGB(35, 30, 25));
+    g.drawRect(leftPanel, 1.0f);
+
+    auto bottomPanel = bounds.removeFromBottom(150);
+    g.setColour(juce::Colour::fromRGB(22, 20, 17));
+    g.fillRect(bottomPanel);
+    g.setColour(juce::Colour::fromRGB(35, 30, 25));
+    g.drawRect(bottomPanel, 1.0f);
 }
 
 void TroakarSpectralAudioProcessorEditor::resized()
 {
-    auto bounds = getLocalBounds().reduced(12);
+    auto bounds = getLocalBounds();
 
-    auto topBar = bounds.removeFromTop(26);
+    auto topPanel = bounds.removeFromTop(44);
+    auto topRight = topPanel.removeFromRight(320).reduced(0, 10);
     
-    fftComboBox.setBounds(topBar.removeFromRight(120));
-    topBar.removeFromRight(10);
-    deltaButton.setBounds(topBar.removeFromRight(60));
-    topBar.removeFromRight(10);
+    fftComboBox.setBounds(topRight.removeFromRight(110));
+    topRight.removeFromRight(10);
+    viewRangeComboBox.setBounds(topRight.removeFromRight(80));
+    topRight.removeFromRight(10);
+    deltaButton.setBounds(topRight.removeFromRight(70));
     
-    gradientOverlay->setBounds(topBar);
+    topPanel.removeFromLeft(400);
+    gradientOverlay->setBounds(topPanel.reduced(20, 7));
 
-    bounds.removeFromTop(6);
-    eqGraph.setBounds(bounds.removeFromTop(400));
-    bounds.removeFromTop(15);
+    auto leftPanel = bounds.removeFromLeft(90);
+    int globalKnobH = leftPanel.getHeight() / 3;
+    
+    auto inArea = leftPanel.removeFromTop(globalKnobH).reduced(4);
+    inGainKnob->setBounds(inArea);
+    
+    auto outArea = leftPanel.removeFromTop(globalKnobH).reduced(4);
+    outLvlKnob->setBounds(outArea);
+    
+    mixKnob->setBounds(leftPanel.reduced(4));
+    
+    int linkW = 40, linkH = 18;
+    linkButton.setBounds(inArea.getCentreX() - linkW/2, inArea.getBottom() - linkH/2 - 2, linkW, linkH);
 
-    int knobWidth = bounds.getWidth() / 10;
-    inGainKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    outLvlKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    mixKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    amountKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    upRangeKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    downRangeKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    speedKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    smoothKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    upSelKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
-    downSelKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
+    auto bottomPanel = bounds.removeFromBottom(150).reduced(0, 4);
+    
+    int blockW = bottomPanel.getWidth() / 7;
+
+    auto amountArea = bottomPanel.removeFromLeft(blockW).reduced(4);
+    amountKnob->setBounds(amountArea);
+
+    auto upBlock = bottomPanel.removeFromLeft(blockW);
+    upRangeKnob->setBounds(upBlock.removeFromTop(upBlock.getHeight() * 0.58f).reduced(4, 0));
+    upSelKnob->setBounds(upBlock.reduced(10, 0)); 
+
+    auto downBlock = bottomPanel.removeFromLeft(blockW);
+    downRangeKnob->setBounds(downBlock.removeFromTop(downBlock.getHeight() * 0.58f).reduced(4, 0));
+    downSelKnob->setBounds(downBlock.reduced(10, 0));
+
+    auto timeBlock = bottomPanel.removeFromLeft(blockW * 2);
+    speedAutoButton.setBounds(timeBlock.getRight() - 28, timeBlock.getY() + 10, 22, 22);
+    timeBlock.removeFromRight(30); 
+
+    if (speedAutoButton.getToggleState()) {
+        speedKnob->setBounds(timeBlock.withSizeKeepingCentre(blockW, timeBlock.getHeight()).reduced(4));
+    } else {
+        int tkW = timeBlock.getWidth() / 3;
+        attackKnob->setBounds(timeBlock.removeFromLeft(tkW).reduced(2, 4));
+        releaseKnob->setBounds(timeBlock.removeFromLeft(tkW).reduced(2, 4));
+        kneeKnob->setBounds(timeBlock.reduced(2, 4));
+    }
+
+    auto smoothArea = bottomPanel.removeFromLeft(blockW).reduced(4);
+    smoothKnob->setBounds(smoothArea);
+
+    auto lookArea = bottomPanel.reduced(4);
+    lookaheadKnob->setBounds(lookArea);
+
+    eqGraph.setBounds(bounds.reduced(6));
 }
