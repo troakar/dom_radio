@@ -7,6 +7,7 @@ class GradientKnob : public juce::Component
 public:
     struct GradientMarker
     {
+        int id = 0;
         float normalizedValue = 0.0f;
         juce::Colour color;
     };
@@ -25,6 +26,12 @@ public:
     void setLocked(bool locked);
 
     void setGradientMarkers(const std::vector<GradientMarker>& markers);
+
+    void bindToParameter(juce::AudioProcessorValueTreeState& apvts, const juce::String& paramID)
+    {
+        attachment.reset();
+        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, paramID, slider);
+    }
 
     juce::Slider slider;
 

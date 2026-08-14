@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <atomic>
 #include "../PluginProcessor.h"
 #include "GradientBandModel.h"
 
@@ -32,6 +33,41 @@ private:
 
     void timerCallback() override
     {
+        const int currentVisualFFTSize = processor.getCurrentFFTSize();
+
+        if (currentVisualFFTSize != lastVisualFFTSize) {
+            lastVisualFFTSize = currentVisualFFTSize;
+            cachedUpFill.clear();
+            cachedDownFill.clear();
+            cachedUpLine.clear();
+            cachedDownLine.clear();
+            cachedSpecPath.clear();
+            cachedScPath.clear();
+            targetPathDirty = true;
+        }
+
+        const int currentFFTMode =
+            static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
+
+        if (currentFFTMode != lastFFTMode) {
+            lastFFTMode = currentFFTMode;
+            targetPathDirty = true;
+        }
+
+        for (auto& p : gradientManager.points) {
+            juce::String prefix = "GRADIENT_" + juce::String(p.id);
+            p.centerFreqHz    = *processor.apvts.getRawParameterValue(prefix + "_CENTER_FREQ");
+            p.centerGainDb    = *processor.apvts.getRawParameterValue(prefix + "_CENTER_GAIN");
+            p.radiusOctaves   = *processor.apvts.getRawParameterValue(prefix + "_BANDWIDTH");
+            p.amountPct       = *processor.apvts.getRawParameterValue(prefix + "_AMOUNT");
+            p.upMaxDb         = *processor.apvts.getRawParameterValue(prefix + "_UP_MAX");
+            p.downMaxDb       = -(*processor.apvts.getRawParameterValue(prefix + "_DOWN_MAX"));
+            p.speedPct        = *processor.apvts.getRawParameterValue(prefix + "_SPEED");
+            p.smoothPct       = *processor.apvts.getRawParameterValue(prefix + "_SMOOTH");
+            p.upSelectivity   = *processor.apvts.getRawParameterValue(prefix + "_UP_SEL");
+            p.downSelectivity = *processor.apvts.getRawParameterValue(prefix + "_DOWN_SEL");
+        }
+
         if (targetPathDirty)
             updateTargetCurveCache();
 
@@ -74,6 +110,7 @@ private:
     std::vector<float> targetDbPerPixel;
     mutable juce::Path cachedTargetPath;
     mutable juce::Path cachedSpecPath;
+    mutable juce::Path cachedScPath;
 
     juce::Path cachedUpFill;
     juce::Path cachedDownFill;
@@ -81,8 +118,11 @@ private:
     juce::Path cachedDownLine;
 
     bool targetPathDirty = true;
+    int lastFFTMode = -1;
+    int lastVisualFFTSize = 512;
     std::unique_ptr<ParameterListener> paramListener;
 
-    static constexpr float maxDb = 24.0f;
+    static constexpr float minDb = -36.0f;
+    static constexpr float maxDb = 6.0f;
     const juce::Colour phosphor { juce::Colour::fromRGB(255, 176, 40) };
 };

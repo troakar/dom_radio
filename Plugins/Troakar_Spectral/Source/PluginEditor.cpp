@@ -14,6 +14,12 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
         eqGraph.repaint();
     };
 
+    gradientOverlay->onPointDeleted = [this](int) {
+        audioProcessor.syncGradientPointsToAPVTS();
+        updateKnobStates();
+        eqGraph.repaint();
+    };
+
     eqGraph.onGradientSelectionChanged = [this]() {
         updateKnobStates();
         gradientOverlay->repaint();
@@ -25,6 +31,19 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     };
     addAndMakeVisible(gradientOverlay.get());
 
+    fftComboBox.addItemList({"512 (Fast)", "1024 (Balanced)", "2048 (Precise)"}, 1);
+    fftComboBox.setJustificationType(juce::Justification::centred);
+    fftComboBox.setColour(juce::ComboBox::backgroundColourId, juce::Colour::fromRGB(24, 22, 18));
+    addAndMakeVisible(fftComboBox);
+    fftAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "FFT_MODE", fftComboBox);
+
+    deltaButton.setButtonText("DELTA");
+    deltaButton.setClickingTogglesState(true);
+    deltaButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(35, 30, 25));
+    deltaButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(240, 140, 30));
+    addAndMakeVisible(deltaButton);
+    deltaAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(audioProcessor.apvts, "DELTA_MODE", deltaButton);
+
     inGainKnob  = std::make_unique<GradientKnob>(audioProcessor.apvts, "IN_GAIN",  "IN GAIN",  false);
     outLvlKnob  = std::make_unique<GradientKnob>(audioProcessor.apvts, "OUT_LVL",  "OUT LVL",  false);
     mixKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "MIX",      "MIX",      false);
@@ -34,6 +53,8 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     downRangeKnob = std::make_unique<GradientKnob>(audioProcessor.apvts, "DOWNWARD_RANGE", "DOWN MAX",  true);
     speedKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "SPECTRAL_SPEED", "SPEED",     true);
     smoothKnob    = std::make_unique<GradientKnob>(audioProcessor.apvts, "SMOOTHING",      "SMOOTH",    true);
+    upSelKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "UP_SEL",         "UP SEL",    true);
+    downSelKnob   = std::make_unique<GradientKnob>(audioProcessor.apvts, "DOWN_SEL",       "DOWN SEL",  true);
 
     addAndMakeVisible(inGainKnob.get());
     addAndMakeVisible(outLvlKnob.get());
@@ -43,12 +64,8 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     addAndMakeVisible(downRangeKnob.get());
     addAndMakeVisible(speedKnob.get());
     addAndMakeVisible(smoothKnob.get());
-
-    amountKnob->slider.onValueChange = [this]() { onGradientKnobChanged(); };
-    upRangeKnob->slider.onValueChange = [this]() { onGradientKnobChanged(); };
-    downRangeKnob->slider.onValueChange = [this]() { onGradientKnobChanged(); };
-    speedKnob->slider.onValueChange = [this]() { onGradientKnobChanged(); };
-    smoothKnob->slider.onValueChange = [this]() { onGradientKnobChanged(); };
+    addAndMakeVisible(upSelKnob.get());
+    addAndMakeVisible(downSelKnob.get());
 
     updateKnobStates();
     setSize (960, 620);
@@ -65,68 +82,57 @@ void TroakarSpectralAudioProcessorEditor::updateKnobStates()
     auto* point = gradientManager.getActivePoint();
     juce::Colour currentCapColor = isGradientMode ? point->color : juce::Colour::fromRGB(180, 175, 160);
 
-    inGainKnob->setGradientActive(isGradientMode, currentCapColor);
-    outLvlKnob->setGradientActive(isGradientMode, currentCapColor);
-    mixKnob->setGradientActive(isGradientMode, currentCapColor);
+    inGainKnob->setGradientActive(false, currentCapColor);
+    outLvlKnob->setGradientActive(false, currentCapColor);
+    mixKnob->setGradientActive(false, currentCapColor);
 
     amountKnob->setGradientActive(isGradientMode, currentCapColor);
     upRangeKnob->setGradientActive(isGradientMode, currentCapColor);
     downRangeKnob->setGradientActive(isGradientMode, currentCapColor);
     speedKnob->setGradientActive(isGradientMode, currentCapColor);
     smoothKnob->setGradientActive(isGradientMode, currentCapColor);
+    upSelKnob->setGradientActive(isGradientMode, currentCapColor);
+    downSelKnob->setGradientActive(isGradientMode, currentCapColor);
 
     if (isGradientMode)
     {
-        syncKnobsWithSelectedGradient();
+        juce::String prefix = "GRADIENT_" + juce::String(point->id);
+        amountKnob->bindToParameter(audioProcessor.apvts, prefix + "_AMOUNT");
+        upRangeKnob->bindToParameter(audioProcessor.apvts, prefix + "_UP_MAX");
+        downRangeKnob->bindToParameter(audioProcessor.apvts, prefix + "_DOWN_MAX");
+        speedKnob->bindToParameter(audioProcessor.apvts, prefix + "_SPEED");
+        smoothKnob->bindToParameter(audioProcessor.apvts, prefix + "_SMOOTH");
+        upSelKnob->bindToParameter(audioProcessor.apvts, prefix + "_UP_SEL");
+        downSelKnob->bindToParameter(audioProcessor.apvts, prefix + "_DOWN_SEL");
     }
     else
     {
-        std::vector<GradientKnob::GradientMarker> amountMarkers, upMarkers, downMarkers, speedMarkers, smoothMarkers;
+        amountKnob->bindToParameter(audioProcessor.apvts, "AMOUNT");
+        upRangeKnob->bindToParameter(audioProcessor.apvts, "UPWARD_RANGE");
+        downRangeKnob->bindToParameter(audioProcessor.apvts, "DOWNWARD_RANGE");
+        speedKnob->bindToParameter(audioProcessor.apvts, "SPECTRAL_SPEED");
+        smoothKnob->bindToParameter(audioProcessor.apvts, "SMOOTHING");
+        upSelKnob->bindToParameter(audioProcessor.apvts, "UP_SEL");
+        downSelKnob->bindToParameter(audioProcessor.apvts, "DOWN_SEL");
 
-        for (const auto& p : gradientManager.points)
-        {
-            amountMarkers.push_back({ p.amountPct / 150.0f, p.color });
-            upMarkers.push_back    ({ p.upMaxDb / 24.0f,    p.color });
-            downMarkers.push_back  ({ (p.downMaxDb + 24.0f) / 24.0f, p.color });
-            speedMarkers.push_back ({ p.speedPct / 100.0f,  p.color });
-            smoothMarkers.push_back({ p.smoothPct / 100.0f, p.color });
+        std::vector<GradientKnob::GradientMarker> amountMarkers, upMarkers, downMarkers, speedMarkers, smoothMarkers, upSelMarkers, downSelMarkers;
+        for (const auto& p : gradientManager.points) {
+            amountMarkers.push_back({ p.id, p.amountPct / 150.0f, p.color });
+            upMarkers.push_back    ({ p.id, p.upMaxDb / 24.0f,    p.color });
+            downMarkers.push_back  ({ p.id, (-p.downMaxDb) / 24.0f, p.color });
+            speedMarkers.push_back ({ p.id, p.speedPct / 100.0f,  p.color });
+            smoothMarkers.push_back({ p.id, p.smoothPct / 100.0f, p.color });
+            upSelMarkers.push_back ({ p.id, (p.upSelectivity + 100.0f) / 200.0f, p.color });
+            downSelMarkers.push_back({p.id, (p.downSelectivity + 100.0f) / 200.0f, p.color });
         }
-
         amountKnob->setGradientMarkers(amountMarkers);
         upRangeKnob->setGradientMarkers(upMarkers);
         downRangeKnob->setGradientMarkers(downMarkers);
         speedKnob->setGradientMarkers(speedMarkers);
         smoothKnob->setGradientMarkers(smoothMarkers);
+        upSelKnob->setGradientMarkers(upSelMarkers);
+        downSelKnob->setGradientMarkers(downSelMarkers);
     }
-}
-
-void TroakarSpectralAudioProcessorEditor::syncKnobsWithSelectedGradient()
-{
-    auto* point = gradientManager.getActivePoint();
-    if (!point) return;
-
-    amountKnob->slider.setValue(point->amountPct, juce::dontSendNotification);
-    upRangeKnob->slider.setValue(point->upMaxDb, juce::dontSendNotification);
-    downRangeKnob->slider.setValue(point->downMaxDb, juce::dontSendNotification);
-    speedKnob->slider.setValue(point->speedPct, juce::dontSendNotification);
-    smoothKnob->slider.setValue(point->smoothPct, juce::dontSendNotification);
-}
-
-void TroakarSpectralAudioProcessorEditor::onGradientKnobChanged()
-{
-    if (!gradientManager.hasActivePoint()) return;
-
-    auto* point = gradientManager.getActivePoint();
-    if (!point) return;
-
-    point->amountPct   = (float)amountKnob->slider.getValue();
-    point->upMaxDb     = (float)upRangeKnob->slider.getValue();
-    point->downMaxDb   = (float)downRangeKnob->slider.getValue();
-    point->speedPct    = (float)speedKnob->slider.getValue();
-    point->smoothPct   = (float)smoothKnob->slider.getValue();
-
-    audioProcessor.syncGradientPointsToAPVTS();
-    updateKnobStates();
 }
 
 void TroakarSpectralAudioProcessorEditor::paint (juce::Graphics& g)
@@ -138,14 +144,20 @@ void TroakarSpectralAudioProcessorEditor::resized()
 {
     auto bounds = getLocalBounds().reduced(12);
 
-    gradientOverlay->setBounds(bounds.removeFromTop(26));
-    bounds.removeFromTop(6);
+    auto topBar = bounds.removeFromTop(26);
+    
+    fftComboBox.setBounds(topBar.removeFromRight(120));
+    topBar.removeFromRight(10);
+    deltaButton.setBounds(topBar.removeFromRight(60));
+    topBar.removeFromRight(10);
+    
+    gradientOverlay->setBounds(topBar);
 
+    bounds.removeFromTop(6);
     eqGraph.setBounds(bounds.removeFromTop(400));
     bounds.removeFromTop(15);
 
-    int knobWidth = bounds.getWidth() / 8;
-
+    int knobWidth = bounds.getWidth() / 10;
     inGainKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
     outLvlKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
     mixKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
@@ -154,4 +166,6 @@ void TroakarSpectralAudioProcessorEditor::resized()
     downRangeKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
     speedKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
     smoothKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
+    upSelKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
+    downSelKnob->setBounds(bounds.removeFromLeft(knobWidth).reduced(4));
 }

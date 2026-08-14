@@ -11,7 +11,7 @@ EQGraphLED::EQGraphLED(TroakarSpectralAudioProcessor& p)
     globalThreshSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
     globalThreshSlider.setPopupDisplayEnabled(true, true, nullptr);
     
-    globalThreshSlider.setRange(-maxDb, maxDb, 0.1);
+    globalThreshSlider.setRange(minDb, maxDb, 0.1);
     globalThreshSlider.setValue(0.0, juce::dontSendNotification);
     addAndMakeVisible(globalThreshSlider);
 
@@ -27,6 +27,8 @@ EQGraphLED::EQGraphLED(TroakarSpectralAudioProcessor& p)
         processor.apvts.addParameterListener(prefix + "_ENABLE", paramListener.get());
     }
     processor.apvts.addParameterListener("GLOBAL_THRESH", paramListener.get());
+    processor.apvts.addParameterListener("FFT_MODE", paramListener.get());
+    lastFFTMode = static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
 }
 
 EQGraphLED::~EQGraphLED()
@@ -40,19 +42,34 @@ EQGraphLED::~EQGraphLED()
             processor.apvts.removeParameterListener(prefix + "_ENABLE", paramListener.get());
         }
         processor.apvts.removeParameterListener("GLOBAL_THRESH", paramListener.get());
+        processor.apvts.removeParameterListener("FFT_MODE", paramListener.get());
     }
 }
 float EQGraphLED::freqToX(float f) const  { return std::log10(juce::jlimit(20.0f, 20000.0f, f) / 20.0f) / 3.0f * (float)getWidth(); }
 float EQGraphLED::xToFreq(float x) const  { return 20.0f * std::pow(10.0f, 3.0f * x / (float)getWidth()); }
-float EQGraphLED::gainToY(float dB) const { return (float)getHeight() * 0.5f - (dB / maxDb) * (float)getHeight() * 0.45f; }
-float EQGraphLED::yToGain(float y) const  { return ((float)getHeight() * 0.5f - y) / ((float)getHeight() * 0.45f) * maxDb; }
+float EQGraphLED::gainToY(float dB) const 
+{ 
+    float norm = (dB - minDb) / (maxDb - minDb);
+    norm = juce::jlimit(0.0f, 1.0f, norm);
+    float topMargin = (float)getHeight() * 0.08f;
+    float bottomMargin = (float)getHeight() * 0.92f;
+    return bottomMargin - norm * (bottomMargin - topMargin);
+}
+
+float EQGraphLED::yToGain(float y) const  
+{ 
+    float topMargin = (float)getHeight() * 0.08f;
+    float bottomMargin = (float)getHeight() * 0.92f;
+    float norm = (bottomMargin - y) / (bottomMargin - topMargin);
+    return minDb + norm * (maxDb - minDb);
+}
 
 void EQGraphLED::resized()
 {
     auto bounds = getLocalBounds();
     
-    float yTop = gainToY(maxDb);
-    float yBottom = gainToY(-maxDb);
+    float yTop = gainToY(maxDb);       // +6 dB (вверху)
+    float yBottom = gainToY(minDb);    // -36 dB (внизу)
     float trackHeight = yBottom - yTop;
     
     auto leftArea = bounds.removeFromLeft(28).reduced(4, 0);
@@ -82,14 +99,23 @@ void EQGraphLED::rebuildBackgroundCache()
     g.setGradientFill(bg);
     g.fillRoundedRectangle(b, 5.0f);
 
-    g.setColour(phosphor.withAlpha(0.08f));
+    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+
     for (float f : { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
     {
         float x = freqToX(f);
+        
+        g.setColour(phosphor.withAlpha(0.08f));
         g.drawVerticalLine((int)x, 0.0f, b.getBottom());
+
+        g.setColour(phosphor.withAlpha(0.4f));
+        juce::String fText = (f >= 1000.0f) ? juce::String(static_cast<int>(f / 1000.0f)) + "k" 
+                                            : juce::String(static_cast<int>(f));
+        g.drawText(fText, (int)x - 20, (int)b.getBottom() - 16, 40, 14, juce::Justification::centredBottom);
     }
     
-    for (int db = -24; db <= 24; db += 6)
+    // Рисуем сетку от -36 до +6 с шагом 6 dB
+    for (int db = -36; db <= 6; db += 6)
     {
         float y = gainToY((float)db);
         g.setColour(phosphor.withAlpha(db == 0 ? 0.20f : 0.05f));
@@ -169,6 +195,8 @@ void EQGraphLED::updateTargetCurveCache()
         filters[activeCount++].setPeak(sr, f0, q, gainDb);
     }
 
+    float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
+
     cachedTargetPath.clear();
     cachedTargetPath.preallocateSpace(w / 4 + 10);
 
@@ -183,12 +211,14 @@ void EQGraphLED::updateTargetCurveCache()
         for (int f = 0; f < activeCount; ++f)
             totalMagSq *= filters[f].getMagSq(cw, c2w);
 
-        float dB = static_cast<float>(10.0 * std::log10(std::max(1.0e-15, totalMagSq)));
-        targetDbPerPixel[x] = dB;
+        float eqDb = static_cast<float>(10.0 * std::log10(std::max(1.0e-15, totalMagSq)));
+        
+        float totalCurveDb = eqDb + globalThresh; 
+        targetDbPerPixel[x] = totalCurveDb;
 
         if (x % 4 == 0 || x == w)
         {
-            float y = juce::jlimit(3.0f, static_cast<float>(getHeight()) - 3.0f, gainToY(dB));
+            float y = juce::jlimit(3.0f, static_cast<float>(getHeight()) - 3.0f, gainToY(totalCurveDb));
             if (x == 0) cachedTargetPath.startNewSubPath(0.0f, y);
             else        cachedTargetPath.lineTo(static_cast<float>(x), y);
         }
@@ -333,29 +363,143 @@ juce::Path& EQGraphLED::buildTargetCurvePath() const
 void EQGraphLED::drawSpectrumFog(juce::Graphics& g, const juce::Rectangle<float>& bounds)
 {
     const int w = getWidth();
-    const double sr = juce::jmax(44100.0, processor.getSampleRate());
+    if (w <= 0) return;
 
+    const int fftSize = processor.getCurrentFFTSize();
+    const double sr = juce::jmax(44100.0, processor.getSampleRate());
+    const int numBins = fftSize / 2;
+    const double binWidthHz = sr / static_cast<double>(fftSize);
+    const double nyquistHz = sr * 0.5;
+
+    // Проверяем наличие сайдчейна
+    bool hasSidechainSignal = false;
+    for (int i = 0; i < std::min(numBins, 60); ++i) {
+        if (processor.sidechainData[i].load(std::memory_order_relaxed) > 1.0e-4f) {
+            hasSidechainSignal = true;
+            break;
+        }
+    }
+
+    // =========================================================================
+    // ТОЧНЫЙ ПИК-ПУЛИНГ ПО ПИКСЕЛЯМ ЭКРАНА
+    // =========================================================================
+    std::vector<float> mainCurveDb(w + 1, -100.0f);
+    std::vector<float> scCurveDb(w + 1, -100.0f);
+
+    for (int x = 0; x <= w; ++x) {
+        const double centerFreq = xToFreq(static_cast<float>(x));
+        if (centerFreq <= 20.0 || centerFreq >= nyquistHz) continue;
+
+        // Определяем границы физического пикселя в герцах
+        const double freqLeft  = xToFreq(std::max(0.0f, static_cast<float>(x) - 0.5f));
+        const double freqRight = xToFreq(std::min(static_cast<float>(w), static_cast<float>(x) + 0.5f));
+
+        // Перцептуальная компенсация — ТА ЖЕ, что и в детекторе
+        const float perceptualTiltDb = 3.0f * std::log2(std::max(20.0f, static_cast<float>(centerFreq)) / 1000.0f);
+
+        // Если в пиксель помещается несколько бинов — берём максимум
+        if ((freqRight - freqLeft) > binWidthHz) {
+            int firstBin = juce::jlimit(1, numBins - 1, static_cast<int>(std::floor(freqLeft / binWidthHz)));
+            int lastBin  = juce::jlimit(1, numBins - 1, static_cast<int>(std::ceil(freqRight / binWidthHz)));
+
+            float maxMain = -100.0f;
+            float maxSc   = -100.0f;
+
+            for (int b = firstBin; b <= lastBin; ++b) {
+                float rawMag = processor.spectrumDataLeft[b].load(std::memory_order_relaxed);
+                if (rawMag > 1.0e-7f) {
+                    float db = juce::Decibels::gainToDecibels(rawMag) + perceptualTiltDb;
+                    maxMain = std::max(maxMain, db);
+                }
+                if (hasSidechainSignal) {
+                    float scMag = processor.sidechainData[b].load(std::memory_order_relaxed);
+                    if (scMag > 1.0e-7f) {
+                        float scDb = juce::Decibels::gainToDecibels(scMag) + perceptualTiltDb;
+                        maxSc = std::max(maxSc, scDb);
+                    }
+                }
+            }
+
+            mainCurveDb[x] = maxMain;
+            if (hasSidechainSignal) scCurveDb[x] = maxSc;
+        } else {
+            // Если бины шире пикселя (зона НЧ) — линейная интерполяция
+            const double binPos = centerFreq / binWidthHz;
+            int idx = juce::jlimit(1, numBins - 2, static_cast<int>(std::floor(binPos)));
+            float frac = static_cast<float>(binPos - idx);
+
+            float aMag = processor.spectrumDataLeft[idx].load(std::memory_order_relaxed);
+            float bMag = processor.spectrumDataLeft[idx + 1].load(std::memory_order_relaxed);
+
+            float interpMag = aMag + frac * (bMag - aMag);
+            mainCurveDb[x] = (interpMag > 1.0e-7f)
+                ? juce::Decibels::gainToDecibels(interpMag) + perceptualTiltDb
+                : -100.0f;
+
+            if (hasSidechainSignal) {
+                float aSc = processor.sidechainData[idx].load(std::memory_order_relaxed);
+                float bSc = processor.sidechainData[idx + 1].load(std::memory_order_relaxed);
+                float interpSc = aSc + frac * (bSc - aSc);
+                scCurveDb[x] = (interpSc > 1.0e-7f)
+                    ? juce::Decibels::gainToDecibels(interpSc) + perceptualTiltDb
+                    : -100.0f;
+            }
+        }
+    }
+
+    // Заполняем края, чтобы график не уходил в бездну
+    int firstValid = -1, lastValid = -1;
+    for (int x = 0; x <= w; ++x) {
+        if (mainCurveDb[x] > -99.0f) {
+            if (firstValid == -1) firstValid = x;
+            lastValid = x;
+        }
+    }
+    if (firstValid > 0) {
+        for (int x = 0; x < firstValid; ++x) {
+            mainCurveDb[x] = mainCurveDb[firstValid];
+            if (hasSidechainSignal) scCurveDb[x] = scCurveDb[firstValid];
+        }
+    }
+    if (lastValid != -1 && lastValid < w) {
+        for (int x = lastValid + 1; x <= w; ++x) {
+            mainCurveDb[x] = mainCurveDb[lastValid];
+            if (hasSidechainSignal) scCurveDb[x] = scCurveDb[lastValid];
+        }
+    }
+
+    // Отрисовка Main Spectrum
     cachedSpecPath.clear();
-    cachedSpecPath.preallocateSpace(w / 6 + 10);
-    bool first = true;
-    float spatialSmoothedSpec = 0.0f;
-    
-    for (int x = 0; x <= w; x += 6) {
-        double freq = freqPerPixel[x];
-        float specDb = getInterpolatedArray(processor.spectrumDataLeft, freq, sr);
-        
-        if (x == 0) spatialSmoothedSpec = specDb;
-        else spatialSmoothedSpec = spatialSmoothedSpec * 0.4f + specDb * 0.6f;
-        
-        float visualDb = spatialSmoothedSpec;
-        float ySpec = juce::jlimit(0.0f, bounds.getBottom(), gainToY(visualDb));
-        
-        if (first) { cachedSpecPath.startNewSubPath((float)x, ySpec); first = false; }
-        else { cachedSpecPath.lineTo((float)x, ySpec); }
+    cachedSpecPath.startNewSubPath(0.0f, juce::jlimit(0.0f, bounds.getBottom(), gainToY(mainCurveDb[0])));
+    for (int x = 1; x <= w; ++x) {
+        cachedSpecPath.lineTo(static_cast<float>(x), juce::jlimit(0.0f, bounds.getBottom(), gainToY(mainCurveDb[x])));
     }
     
-    g.setColour(phosphor.withAlpha(0.12f));
-    g.strokePath(cachedSpecPath, juce::PathStrokeType(1.2f));
+    if (!cachedSpecPath.isEmpty()) {
+        juce::Path fillPath(cachedSpecPath);
+        fillPath.lineTo(bounds.getRight(), bounds.getBottom());
+        fillPath.lineTo(0.0f, bounds.getBottom());
+        fillPath.closeSubPath();
+
+        juce::ColourGradient fillGrad(phosphor.withAlpha(0.06f), 0.0f, gainToY(maxDb),
+                                      phosphor.withAlpha(0.0f),  0.0f, bounds.getBottom(), false);
+        g.setGradientFill(fillGrad);
+        g.fillPath(fillPath);
+
+        g.setColour(phosphor.withAlpha(0.40f));
+        g.strokePath(cachedSpecPath, juce::PathStrokeType(1.1f));
+    }
+
+    // Отрисовка Sidechain Spectrum
+    if (hasSidechainSignal) {
+        cachedScPath.clear();
+        cachedScPath.startNewSubPath(0.0f, juce::jlimit(0.0f, bounds.getBottom(), gainToY(scCurveDb[0])));
+        for (int x = 1; x <= w; ++x) {
+            cachedScPath.lineTo(static_cast<float>(x), juce::jlimit(0.0f, bounds.getBottom(), gainToY(scCurveDb[x])));
+        }
+        g.setColour(juce::Colour::fromRGB(40, 200, 255).withAlpha(0.6f));
+        g.strokePath(cachedScPath, juce::PathStrokeType(1.2f));
+    }
 }
 
 void EQGraphLED::paint(juce::Graphics& g)
@@ -491,6 +635,7 @@ void EQGraphLED::paint(juce::Graphics& g)
     }
 
     // 2. ВОССТАНОВЛЕНИЕ: Отрисовка узлов обычного эквалайзера (1-8)
+    float globalThreshPaint = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
     for (int i = 0; i < 8; ++i)
     {
         juce::String prefix = "BAND_" + juce::String(i);
@@ -502,7 +647,7 @@ void EQGraphLED::paint(juce::Graphics& g)
         float gain = *processor.apvts.getRawParameterValue(prefix + "_GAIN");
         float q = *processor.apvts.getRawParameterValue(prefix + "_Q");
 
-        juce::Point<float> pos { freqToX(freq), gainToY(gain) };
+        juce::Point<float> pos { freqToX(freq), gainToY(gain + globalThreshPaint) };
 
         float intensity = (draggingNode == i) ? 1.0f : (hoveredNode == i ? 0.85f : 0.5f);
         juce::Colour nodeColor = enabled ? phosphor : juce::Colours::grey;
@@ -528,7 +673,7 @@ void EQGraphLED::paint(juce::Graphics& g)
     {
         if (!gp.active) continue;
         
-        juce::Point<float> center { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb) };
+        juce::Point<float> center { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb + globalThreshPaint) };
         float intensity = gp.isSelected ? 1.0f : (hoveredGradientId == gp.id ? 0.8f : 0.4f);
 
         g.setColour(gp.color.withAlpha(gp.isSelected ? 0.8f : 0.3f));
@@ -543,34 +688,86 @@ void EQGraphLED::paint(juce::Graphics& g)
         }
     }
 
+    float tooltipFreq = -1.0f;
+    float tooltipGain = 0.0f;
+    juce::Point<float> tooltipPos;
+    bool showTooltip = false;
+    juce::Colour tooltipColor = juce::Colours::white;
+
+    if (draggingGradientId >= 0 || hoveredGradientId >= 0) {
+        int id = draggingGradientId >= 0 ? draggingGradientId : hoveredGradientId;
+        if (auto* gp = processor.gradientManager.getPoint(id)) {
+            tooltipFreq = gp->centerFreqHz;
+            tooltipGain = gp->centerGainDb;
+            tooltipPos = { freqToX(tooltipFreq), gainToY(tooltipGain + globalThreshPaint) };
+            tooltipColor = gp->color;
+            showTooltip = true;
+        }
+    } 
+    else if (draggingNode >= 0 || hoveredNode >= 0) {
+        int id = draggingNode >= 0 ? draggingNode : hoveredNode;
+        juce::String prefix = "BAND_" + juce::String(id);
+        tooltipFreq = *processor.apvts.getRawParameterValue(prefix + "_FREQ");
+        tooltipGain = *processor.apvts.getRawParameterValue(prefix + "_GAIN");
+        tooltipPos = { freqToX(tooltipFreq), gainToY(tooltipGain + globalThreshPaint) };
+        tooltipColor = phosphor;
+        showTooltip = true;
+    }
+
+    if (showTooltip) {
+        juce::String fStr = tooltipFreq >= 1000.0f ? juce::String(tooltipFreq / 1000.0f, 2) + " kHz" 
+                                                   : juce::String(std::round(tooltipFreq)) + " Hz";
+        juce::String gStr = juce::String(tooltipGain, 1) + " dB";
+        juce::String text = fStr + " | " + gStr;
+
+        int textW = 100;
+        int textH = 22;
+        juce::Rectangle<float> badge(tooltipPos.x - textW / 2.0f, tooltipPos.y - 40.0f, (float)textW, (float)textH);
+
+        if (badge.getY() < 5.0f) badge.setY(tooltipPos.y + 15.0f);
+        if (badge.getX() < 5.0f) badge.setX(5.0f);
+        if (badge.getRight() > bounds.getRight() - 5.0f) badge.setX(bounds.getRight() - textW - 5.0f);
+
+        g.setColour(juce::Colour::fromRGB(20, 18, 15).withAlpha(0.95f));
+        g.fillRoundedRectangle(badge, 4.0f);
+        
+        g.setColour(tooltipColor.withAlpha(0.7f));
+        g.drawRoundedRectangle(badge, 4.0f, 1.2f);
+
+        g.setColour(juce::Colours::white.withAlpha(0.95f));
+        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+        g.drawText(text, badge, juce::Justification::centred, false);
+    }
+
     RetroFX::drawVignette(g, bounds, 0.4f);
     RetroFX::drawGlassHighlight(g, bounds);
 }
 
 void EQGraphLED::mouseDown(const juce::MouseEvent& e)
 {
+    float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
+
     if (e.mods.isPopupMenu())
     {
         juce::PopupMenu menu;
-        menu.addItem(1, "Add Gradient Here");
+        menu.addItem(1, "Add Gradient Here", true, gradientManager.points.size() < 4);
 
         menu.showMenuAsync(juce::PopupMenu::Options(),
-            [this, e](int result)
+            [this, e, globalThresh](int result)
             {
                 if (result == 1)
                 {
-                    const float newFreq = 
-                        juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
-                    const float newGain = 
-                        juce::jlimit(-maxDb, maxDb, yToGain(e.position.y));
+                    const float newFreq = juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
+                    const float newGain = juce::jlimit(minDb, maxDb, yToGain(e.position.y) - globalThresh);
 
-                    const int newId = 
-                        gradientManager.addPoint(newFreq, newGain);
-                    gradientManager.setActivePoint(newId);
-
-                    if (onGradientSelectionChanged) onGradientSelectionChanged();
-                    if (onGradientParamsChanged) onGradientParamsChanged();
-                    repaint();
+                    const int newId = gradientManager.addPoint(newFreq, newGain);
+                    if (newId >= 0)
+                    {
+                        gradientManager.setActivePoint(newId);
+                        if (onGradientSelectionChanged) onGradientSelectionChanged();
+                        if (onGradientParamsChanged) onGradientParamsChanged();
+                        repaint();
+                    }
                 }
             });
         return;
@@ -581,7 +778,7 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
     {
         juce::Point<float> gpPos { 
             freqToX(gp.centerFreqHz), 
-            gainToY(gp.centerGainDb) 
+            gainToY(gp.centerGainDb + globalThresh) 
         };
 
         if (e.position.getDistanceFrom(gpPos) < 20.0f)
@@ -615,7 +812,7 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
         const float gain = 
             *processor.apvts.getRawParameterValue(prefix + "_GAIN");
 
-        const juce::Point<float> pos { freqToX(freq), gainToY(gain) };
+        const juce::Point<float> pos { freqToX(freq), gainToY(gain + globalThresh) };
 
         if (e.position.getDistanceFrom(pos) < 15.0f)
         {
@@ -638,7 +835,7 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
         const float newFreq = 
             juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
         const float newGain = 
-            juce::jlimit(-maxDb, maxDb, yToGain(e.position.y));
+            juce::jlimit(minDb, maxDb, yToGain(e.position.y) - globalThresh);
 
         createEQBandAt(newFreq, newGain);
         repaint();
@@ -648,6 +845,7 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
 void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
 {
     auto& apvts = processor.apvts;
+    float globalThresh = *apvts.getRawParameterValue("GLOBAL_THRESH");
 
     for (int i = 0; i < 8; ++i)
     {
@@ -663,7 +861,7 @@ void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
         const float gain = 
             *apvts.getRawParameterValue(prefix + "_GAIN");
 
-        const juce::Point<float> pos { freqToX(freq), gainToY(gain) };
+        const juce::Point<float> pos { freqToX(freq), gainToY(gain + globalThresh) };
 
         if (e.position.getDistanceFrom(pos) < 15.0f)
         {
@@ -679,7 +877,7 @@ void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
     {
         const juce::Point<float> gpPos { 
             freqToX(gp.centerFreqHz), 
-            gainToY(gp.centerGainDb) 
+            gainToY(gp.centerGainDb + globalThresh) 
         };
 
         if (e.position.getDistanceFrom(gpPos) < 15.0f)
@@ -697,7 +895,7 @@ void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
     const float newFreq = 
         juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
     const float newGain = 
-        juce::jlimit(-maxDb, maxDb, yToGain(e.position.y));
+        juce::jlimit(minDb, maxDb, yToGain(e.position.y) - globalThresh);
 
     createEQBandAt(newFreq, newGain);
     repaint();
@@ -705,6 +903,7 @@ void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
 
 void EQGraphLED::mouseMove(const juce::MouseEvent& e)
 {
+    float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
     int lastHovered = hoveredNode;
     hoveredNode = -1;
     hoveredGradientId = -1;
@@ -713,7 +912,7 @@ void EQGraphLED::mouseMove(const juce::MouseEvent& e)
 
     for (const auto& gp : gradientManager.points)
     {
-        juce::Point<float> gpPos { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb) };
+        juce::Point<float> gpPos { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb + globalThresh) };
         if (e.position.getDistanceFrom(gpPos) < 15.0f)
         {
             hoveredGradientId = gp.id;
@@ -733,7 +932,7 @@ void EQGraphLED::mouseMove(const juce::MouseEvent& e)
             float freq = *processor.apvts.getRawParameterValue(prefix + "_FREQ");
             float gain = *processor.apvts.getRawParameterValue(prefix + "_GAIN");
 
-            juce::Point<float> pos { freqToX(freq), gainToY(gain) };
+            juce::Point<float> pos { freqToX(freq), gainToY(gain + globalThresh) };
             float dist = e.position.getDistanceFrom(pos);
 
             if (dist < 15.0f)
@@ -750,15 +949,25 @@ void EQGraphLED::mouseMove(const juce::MouseEvent& e)
 
 void EQGraphLED::mouseDrag(const juce::MouseEvent& e)
 {
+    float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
+
     if (draggingGradientId >= 0)
     {
         auto* gp = gradientManager.getPoint(draggingGradientId);
         if (gp)
         {
-            gp->centerFreqHz = juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
-            gp->centerGainDb = juce::jlimit(-maxDb, maxDb, yToGain(e.position.y));
+            float newFreq = juce::jlimit(20.0f, 20000.0f, xToFreq(e.position.x));
+            float newGain = juce::jlimit(minDb, maxDb, yToGain(e.position.y) - globalThresh);
+
+            gp->centerFreqHz = newFreq;
+            gp->centerGainDb = newGain;
             
-            if (onGradientParamsChanged) onGradientParamsChanged();
+            juce::String prefix = "GRADIENT_" + juce::String(draggingGradientId);
+            if (auto* fParam = processor.apvts.getParameter(prefix + "_CENTER_FREQ"))
+                fParam->setValueNotifyingHost(fParam->convertTo0to1(newFreq));
+            if (auto* gParam = processor.apvts.getParameter(prefix + "_CENTER_GAIN"))
+                gParam->setValueNotifyingHost(gParam->convertTo0to1(newGain));
+
             repaint();
         }
         return;
@@ -773,8 +982,8 @@ void EQGraphLED::mouseDrag(const juce::MouseEvent& e)
     const float freqRatio = std::pow(10.0f, (deltaX * 3.0f) / (float)getWidth());
     const float newFreq = juce::jlimit(20.0f, 20000.0f, dragStartFreq * freqRatio);
 
-    const float gainDelta = -(deltaY * maxDb) / ((float)getHeight() * 0.45f);
-    const float newGain = juce::jlimit(-maxDb, maxDb, dragStartGain + gainDelta);
+    const float gainDelta = -(deltaY * (maxDb - minDb)) / ((float)getHeight() * 0.84f);
+    const float newGain = juce::jlimit(minDb, maxDb, dragStartGain + gainDelta);
 
     juce::String prefix = "BAND_" + juce::String(draggingNode);
     auto* fParam = processor.apvts.getParameter(prefix + "_FREQ");
@@ -788,9 +997,11 @@ void EQGraphLED::mouseDrag(const juce::MouseEvent& e)
 
 void EQGraphLED::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
+    float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
+
     for (auto& gp : gradientManager.points)
     {
-        juce::Point<float> gpPos { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb) };
+        juce::Point<float> gpPos { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb + globalThresh) };
         
         bool hoverDot = e.position.getDistanceFrom(gpPos) < 25.0f;
         bool hoverSpan = gp.isSelected && std::abs(e.position.x - freqToX(gp.centerFreqHz)) < (getWidth() * 0.1f * gp.radiusOctaves);
@@ -798,9 +1009,13 @@ void EQGraphLED::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWhee
         if (hoverDot || hoverSpan)
         {
             float factor = std::exp(wheel.deltaY * 0.4f);
-            gp.radiusOctaves = juce::jlimit(0.3f, 4.0f, gp.radiusOctaves * factor);
+            float newOctaves = juce::jlimit(0.3f, 4.0f, gp.radiusOctaves * factor);
+            gp.radiusOctaves = newOctaves;
             
-            if (onGradientParamsChanged) onGradientParamsChanged();
+            juce::String prefix = "GRADIENT_" + juce::String(gp.id);
+            if (auto* bwParam = processor.apvts.getParameter(prefix + "_BANDWIDTH"))
+                bwParam->setValueNotifyingHost(bwParam->convertTo0to1(newOctaves));
+
             repaint();
             return;
         }

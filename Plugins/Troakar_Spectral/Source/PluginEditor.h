@@ -27,10 +27,14 @@ private:
 
     std::unique_ptr<GradientKnob> inGainKnob, outLvlKnob, mixKnob;
     std::unique_ptr<GradientKnob> amountKnob, upRangeKnob, downRangeKnob, speedKnob, smoothKnob;
+    std::unique_ptr<GradientKnob> upSelKnob, downSelKnob;
+
+    juce::TextButton deltaButton;
+    juce::ComboBox fftComboBox;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> deltaAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftAttachment;
 
     void updateKnobStates();
-    void syncKnobsWithSelectedGradient();
-    void onGradientKnobChanged();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TroakarSpectralAudioProcessorEditor)
 };

@@ -18,9 +18,11 @@ struct GradientPoint
 
     float amountPct = 100.0f;
     float upMaxDb = 4.0f;
-    float downMaxDb = -4.0f;
+    float downMaxDb = -12.0f;
     float speedPct = 50.0f;
     float smoothPct = 20.0f;
+    float upSelectivity = 0.0f;
+    float downSelectivity = 0.0f;
 };
 
 class GradientPointManager
@@ -42,14 +44,25 @@ public:
 
     int addPoint(float freqHz, float gainDb)
     {
+        if (points.size() >= 4) return -1;
+
+        int newId = 0;
+        for (int i = 0; i < 4; ++i) {
+            bool taken = false;
+            for (const auto& p : points) {
+                if (p.id == i) taken = true;
+            }
+            if (!taken) { newId = i; break; }
+        }
+
         GradientPoint point;
-        point.id = nextId++;
-        point.name = "G" + juce::String(point.id);
+        point.id = newId;
+        point.name = "G" + juce::String(point.id + 1);
         point.color = availableColors[point.id % availableColors.size()];
         point.centerFreqHz = freqHz;
         point.centerGainDb = gainDb;
-        point.active = true;       // По умолчанию работает со звуком
-        point.isSelected = false;  // Но пока не выделен
+        point.active = true;
+        point.isSelected = false;
 
         points.push_back(point);
         return point.id;

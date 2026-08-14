@@ -65,24 +65,21 @@ void GradientKnob::paint(juce::Graphics& g)
     auto sliderBounds = slider.getBounds().toFloat();
     if (sliderBounds.isEmpty()) return;
 
-    float diameter = juce::jmin(sliderBounds.getWidth(), sliderBounds.getHeight() - 18.0f);
-    auto knobArea = juce::Rectangle<float>(0, 0, diameter, diameter)
-                        .withCentre(sliderBounds.getCentre().withY(sliderBounds.getY() + diameter * 0.5f));
+    float fullDiameter = juce::jmin(sliderBounds.getWidth(), sliderBounds.getHeight() - 18.0f);
+    float knobDiameter = fullDiameter * 0.75f; 
+    
+    auto knobArea = juce::Rectangle<float>(0, 0, knobDiameter, knobDiameter)
+                        .withCentre(sliderBounds.getCentre().withY(sliderBounds.getY() + fullDiameter * 0.5f));
 
     float rotaryStartAngle = juce::MathConstants<float>::pi * 1.2f;
     float rotaryEndAngle   = juce::MathConstants<float>::pi * 2.8f;
     
-    // Переведено на стандартный метод JUCE valueToProportionOfLength
     float propVal = (float)slider.valueToProportionOfLength(slider.getValue());
     float currentAngle = rotaryStartAngle + propVal * (rotaryEndAngle - rotaryStartAngle);
 
-    // 1. Отрисовка Окантовки (Outer Ring & Markers)
-    drawOuterRing(g, knobArea.expanded(5.0f), rotaryStartAngle, rotaryEndAngle);
-
-    // 2. Отрисовка Крышечки (Knob Cap)
+    drawOuterRing(g, juce::Rectangle<float>(0, 0, fullDiameter, fullDiameter).withCentre(knobArea.getCentre()), rotaryStartAngle, rotaryEndAngle);
     drawKnobCap(g, knobArea, currentAngle);
 
-    // 3. Отображение Блокировки (Затемнение и Замок при несовместимости)
     if (isLockedState)
     {
         g.setColour(juce::Colours::black.withAlpha(0.55f));
@@ -96,49 +93,47 @@ void GradientKnob::paint(juce::Graphics& g)
 
 void GradientKnob::drawOuterRing(juce::Graphics& g, juce::Rectangle<float> bounds, float startAngle, float endAngle)
 {
-    float radius = bounds.getWidth() * 0.5f;
     auto center = bounds.getCentre();
+    float maxRadius = bounds.getWidth() * 0.5f;
+    float knobRadius = maxRadius * 0.75f;
 
-    // Базовый фоновый трек
-    juce::Path track;
-    track.addCentredArc(center.x, center.y, radius, radius, 0.0f, startAngle, endAngle, true);
+    juce::Path baseTrack;
+    baseTrack.addCentredArc(center.x, center.y, knobRadius, knobRadius, 0.0f, startAngle, endAngle, true);
     g.setColour(juce::Colour::fromRGB(40, 36, 30));
-    g.strokePath(track, juce::PathStrokeType(2.5f));
+    g.strokePath(baseTrack, juce::PathStrokeType(2.5f));
 
     if (isGradientSelected && allowGradientMode)
     {
-        // РЕЖИМ 1: Выделен один градиент — подсвечиваем окантовку его цветом
         float propVal = (float)slider.valueToProportionOfLength(slider.getValue());
         float currentAngle = startAngle + propVal * (endAngle - startAngle);
         juce::Path activeArc;
-        activeArc.addCentredArc(center.x, center.y, radius, radius, 0.0f, startAngle, currentAngle, true);
+        activeArc.addCentredArc(center.x, center.y, knobRadius, knobRadius, 0.0f, startAngle, currentAngle, true);
 
         g.setColour(activeCapColor.withAlpha(0.85f));
         g.strokePath(activeArc, juce::PathStrokeType(3.0f));
     }
     else if (!isLockedState)
     {
-        // РЕЖИМ 2: Глобальный режим — стильные полукруглые окантовки-маркеры на орбите тумблера
+        float ringSpacing = (maxRadius - knobRadius) / 4.0f;
+
         for (const auto& marker : gradientMarkers)
         {
+            float currentRadius = knobRadius + 3.0f + marker.id * ringSpacing;
+            
+            juce::Path orbit;
+            orbit.addCentredArc(center.x, center.y, currentRadius, currentRadius, 0.0f, startAngle, endAngle, true);
+            g.setColour(juce::Colour::fromRGB(40, 36, 30).withAlpha(0.3f));
+            g.strokePath(orbit, juce::PathStrokeType(1.0f));
+
             float angle = startAngle + marker.normalizedValue * (endAngle - startAngle);
+            float arcSpan = 0.08f; 
             
             juce::Path markerArc;
-            float arcSpan = 0.12f; // Ширина полукруглой окантовки в радианах
-            
-            markerArc.addCentredArc(center.x, center.y, radius, radius, 0.0f, 
+            markerArc.addCentredArc(center.x, center.y, currentRadius, currentRadius, 0.0f, 
                                     angle - arcSpan, angle + arcSpan, true);
 
-            // Основная цветная окантовка градиента
-            g.setColour(marker.color.withAlpha(0.85f));
-            g.strokePath(markerArc, juce::PathStrokeType(3.5f, juce::PathStrokeType::mitered, juce::PathStrokeType::rounded));
-            
-            // Внутренний блик-индикатор для резкости
-            juce::Path highlightArc;
-            highlightArc.addCentredArc(center.x, center.y, radius, radius, 0.0f, 
-                                       angle - arcSpan*0.2f, angle + arcSpan*0.2f, true);
-            g.setColour(juce::Colours::white.withAlpha(0.5f));
-            g.strokePath(highlightArc, juce::PathStrokeType(1.5f));
+            g.setColour(marker.color.withAlpha(0.9f));
+            g.strokePath(markerArc, juce::PathStrokeType(2.0f, juce::PathStrokeType::mitered, juce::PathStrokeType::rounded));
         }
     }
 }

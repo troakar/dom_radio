@@ -9,6 +9,50 @@ TroakarSpectralAudioProcessor::TroakarSpectralAudioProcessor()
        apvts (*this, nullptr, "Parameters", createParameterLayout())
 {
     smoothedMix.setCurrentAndTargetValue(1.0f);
+
+    pInGain    = apvts.getRawParameterValue("IN_GAIN");
+    pOutLvl    = apvts.getRawParameterValue("OUT_LVL");
+    pMix       = apvts.getRawParameterValue("MIX");
+    pAmount    = apvts.getRawParameterValue("AMOUNT");
+    pThresh    = apvts.getRawParameterValue("GLOBAL_THRESH");
+    pUpRange   = apvts.getRawParameterValue("UPWARD_RANGE");
+    pDownRange = apvts.getRawParameterValue("DOWNWARD_RANGE");
+    pSpeed     = apvts.getRawParameterValue("SPECTRAL_SPEED");
+    pSmooth    = apvts.getRawParameterValue("SMOOTHING");
+    pUpSel     = apvts.getRawParameterValue("UP_SEL");
+    pDownSel   = apvts.getRawParameterValue("DOWN_SEL");
+    pFftMode   = apvts.getRawParameterValue("FFT_MODE");
+    pDeltaMode = apvts.getRawParameterValue("DELTA_MODE");
+
+    for (int i = 0; i < 4; ++i) {
+        juce::String prefix = "GRADIENT_" + juce::String(i);
+        pGradEnable[i]  = apvts.getRawParameterValue(prefix + "_ENABLE");
+        pGradFreq[i]    = apvts.getRawParameterValue(prefix + "_CENTER_FREQ");
+        pGradGain[i]    = apvts.getRawParameterValue(prefix + "_CENTER_GAIN");
+        pGradBw[i]      = apvts.getRawParameterValue(prefix + "_BANDWIDTH");
+        pGradAmt[i]     = apvts.getRawParameterValue(prefix + "_AMOUNT");
+        pGradUpMax[i]   = apvts.getRawParameterValue(prefix + "_UP_MAX");
+        pGradDownMax[i] = apvts.getRawParameterValue(prefix + "_DOWN_MAX");
+        pGradSpeed[i]   = apvts.getRawParameterValue(prefix + "_SPEED");
+        pGradSmooth[i]  = apvts.getRawParameterValue(prefix + "_SMOOTH");
+        pGradUpSel[i]   = apvts.getRawParameterValue(prefix + "_UP_SEL");
+        pGradDownSel[i] = apvts.getRawParameterValue(prefix + "_DOWN_SEL");
+    }
+
+    for (int i = 0; i < 8; ++i) {
+        juce::String prefix = "BAND_" + juce::String(i);
+        pBandEnable[i] = apvts.getRawParameterValue(prefix + "_ENABLE");
+        pBandFreq[i]   = apvts.getRawParameterValue(prefix + "_FREQ");
+        pBandGain[i]   = apvts.getRawParameterValue(prefix + "_GAIN");
+        pBandQ[i]      = apvts.getRawParameterValue(prefix + "_Q");
+
+        apvts.addParameterListener(prefix + "_ENABLE", this);
+        apvts.addParameterListener(prefix + "_FREQ", this);
+        apvts.addParameterListener(prefix + "_GAIN", this);
+        apvts.addParameterListener(prefix + "_Q", this);
+    }
+    
+    spectralEngine.linkParameters(pBandEnable, pBandFreq, pBandGain, pBandQ);
 }
 
 bool TroakarSpectralAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -25,7 +69,23 @@ bool TroakarSpectralAudioProcessor::isBusesLayoutSupported (const BusesLayout& l
     return true;
 }
 
-TroakarSpectralAudioProcessor::~TroakarSpectralAudioProcessor() {}
+TroakarSpectralAudioProcessor::~TroakarSpectralAudioProcessor() 
+{
+    for (int i = 0; i < 8; ++i) {
+        juce::String prefix = "BAND_" + juce::String(i);
+        apvts.removeParameterListener(prefix + "_ENABLE", this);
+        apvts.removeParameterListener(prefix + "_FREQ", this);
+        apvts.removeParameterListener(prefix + "_GAIN", this);
+        apvts.removeParameterListener(prefix + "_Q", this);
+    }
+}
+
+void TroakarSpectralAudioProcessor::parameterChanged (const juce::String& parameterID, float /*newValue*/)
+{
+    if (parameterID.startsWith("BAND_")) {
+        spectralEngine.invalidateTarget();
+    }
+}
 
 juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcessor::createParameterLayout()
 {
@@ -62,7 +122,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "GLOBAL_THRESH", "Threshold", 
-        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f), 0.0f, 
+        juce::NormalisableRange<float>(-36.0f, 6.0f, 0.1f), 0.0f, 
         FloatAttr().withStringFromValueFunction(dbFormat)));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -72,7 +132,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
     
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "DOWNWARD_RANGE", "Max Downward Red.", 
-        juce::NormalisableRange<float>(-24.0f, 0.0f, 0.1f), -4.0f, 
+        juce::NormalisableRange<float>(0.0f, 24.0f, 0.1f), 12.0f, 
         FloatAttr().withStringFromValueFunction(dbFormat)));
     
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -83,6 +143,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "SMOOTHING", "Freq Smoothing", 
         juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 20.0f, 
+        FloatAttr().withStringFromValueFunction(pctFormat)));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "UP_SEL", "Up Selectivity", 
+        juce::NormalisableRange<float>(-100.0f, 100.0f, 1.0f), 0.0f, 
+        FloatAttr().withStringFromValueFunction(pctFormat)));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "DOWN_SEL", "Down Selectivity", 
+        juce::NormalisableRange<float>(-100.0f, 100.0f, 1.0f), 0.0f, 
         FloatAttr().withStringFromValueFunction(pctFormat)));
 
     for (int i = 0; i < NUM_TARGET_BANDS; ++i)
@@ -146,7 +216,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             idPrefix + "_DOWN_MAX", namePrefix + " Down Max",
-            juce::NormalisableRange<float>(-24.0f, 0.0f, 0.1f), -4.0f,
+            juce::NormalisableRange<float>(0.0f, 24.0f, 0.1f), 12.0f,
             FloatAttr().withStringFromValueFunction(dbFormat)));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -158,11 +228,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
             idPrefix + "_SMOOTH", namePrefix + " Smooth",
             juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 20.0f,
             FloatAttr().withStringFromValueFunction(pctFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_UP_SEL", namePrefix + " Up Sel",
+            juce::NormalisableRange<float>(-100.0f, 100.0f, 1.0f), 0.0f,
+            FloatAttr().withStringFromValueFunction(pctFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_DOWN_SEL", namePrefix + " Down Sel",
+            juce::NormalisableRange<float>(-100.0f, 100.0f, 1.0f), 0.0f,
+            FloatAttr().withStringFromValueFunction(pctFormat)));
     }
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         "FFT_MODE", "FFT Size / Precision",
         juce::StringArray { "512 (Fast / Low Latency)", "1024 (Balanced)", "2048 (Precise / Mastering)" }, 0));
+
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        "DELTA_MODE", "Delta Listen", false));
 
     return { params.begin(), params.end() };
 }
@@ -170,10 +253,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     spectralEngine.prepare(sampleRate);
-    
-    dryDelayBuffer.setSize(2, 2048);
+    visualFFTSize.store(currentFFTSize, std::memory_order_release);
+
+    for (int i = 0; i < MAX_FFT_BINS; ++i) {
+        spectrumDataLeft[i].store(-100.0f, std::memory_order_relaxed);
+        compressionDeltaData[i].store(0.0f, std::memory_order_relaxed);
+        sidechainData[i].store(-100.0f, std::memory_order_relaxed);
+    }
+
+    dryDelayBuffer.setSize(2, 8192);
     dryDelayBuffer.clear();
     dryDelayIndex = 0;
+
+    delayedDryBuffer.setSize(2, MAX_BLOCK_SIZE);
+    delayedDryBuffer.clear();
 
     audioThreadGradients.resize(4);
     smoothedMix.reset(sampleRate, 0.04);
@@ -183,153 +276,145 @@ void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int sample
 
 void TroakarSpectralAudioProcessor::releaseResources() {}
 
-void TroakarSpectralAudioProcessor::processBlock(
-    juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
 
-    const int numSamples  = buffer.getNumSamples();
-    const int numChannels = buffer.getNumChannels();
-    if (numSamples == 0 || numChannels == 0) return;
+    const int numSamples = buffer.getNumSamples();
+    if (numSamples == 0) return;
 
-    int fftMode = static_cast<int>(*apvts.getRawParameterValue("FFT_MODE"));
-    if (fftMode != prevFFTMode)
-    {
-        prevFFTMode = fftMode;
-        currentFFTSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
+    if (numSamples > MAX_BLOCK_SIZE) return;
 
-        spectralEngine.switchFFTSize(currentFFTSize);
-        setLatencySamples(currentFFTSize);
-        updateHostDisplay();
-    }
+    auto mainBus = getBusBuffer(buffer, true, 0);
+    int mainChannels = juce::jmin(mainBus.getNumChannels(), 2);
+    
+    auto sidechainBus = (getBusCount(true) > 1 && getBus(true, 1)->isEnabled()) 
+                        ? getBusBuffer(buffer, true, 1) 
+                        : juce::AudioBuffer<float>();
+    bool hasSidechain = sidechainBus.getNumChannels() > 0;
 
-    // 1. Input gain c плавным кроссфейдом (убирает щелчки)
-    float inGainDb = *apvts.getRawParameterValue("IN_GAIN");
-    const float inGainLin = juce::Decibels::decibelsToGain(inGainDb);
-    if (std::abs(inGainLin - prevInGain) > 1.0e-4f)
-    {
-        buffer.applyGainRamp(0, numSamples, prevInGain, inGainLin);
-        prevInGain = inGainLin;
-    }
-    else
-    {
-        buffer.applyGain(inGainLin);
-    }
-
-    // 2. Dry copy для mix (С ИДЕАЛЬНОЙ ФАЗОВОЙ КОМПЕНСАЦИЕЙ ЗАДЕРЖКИ)
-    float mixPct = *apvts.getRawParameterValue("MIX");
-    smoothedMix.setTargetValue(mixPct / 100.0f);
-
-    juce::AudioBuffer<float> delayedDryBuffer;
-    delayedDryBuffer.setSize(numChannels, numSamples, false, false, true);
-
-    for (int ch = 0; ch < numChannels; ++ch)
-    {
-        const float* dryIn = buffer.getReadPointer(ch);
+    for (int ch = 0; ch < mainChannels; ++ch) {
+        const float* rawIn = mainBus.getReadPointer(ch);
         float* dryOut = delayedDryBuffer.getWritePointer(ch);
         float* delayData = dryDelayBuffer.getWritePointer(ch);
 
         int tempIndex = dryDelayIndex;
-        for (int i = 0; i < numSamples; ++i)
-        {
+        for (int i = 0; i < numSamples; ++i) {
             dryOut[i] = delayData[tempIndex];
-            delayData[tempIndex] = dryIn[i];
-            
+            delayData[tempIndex] = rawIn[i];
             if (++tempIndex >= currentFFTSize) tempIndex = 0;
         }
     }
-    
     dryDelayIndex = (dryDelayIndex + numSamples) % currentFFTSize;
 
-    // 3. Spectral processing
-    float upMax   = *apvts.getRawParameterValue("UPWARD_RANGE");
-    float downMax = *apvts.getRawParameterValue("DOWNWARD_RANGE");
-    float amount  = *apvts.getRawParameterValue("AMOUNT");
-    float speed   = *apvts.getRawParameterValue("SPECTRAL_SPEED");
-    float smooth  = *apvts.getRawParameterValue("SMOOTHING");
+    float inGainDb = *pInGain;
+    const float inGainLin = juce::Decibels::decibelsToGain(inGainDb);
+    const float inGainStart = prevInGain;
 
-    // ЛЕНИВЫЕ ВЫЧИСЛЕНИЯ: Проверяем, трогал ли пользователь ручки
-    bool engineDirty = syncGradientPointsFromAPVTS();
+    if (std::abs(inGainLin - prevInGain) > 1.0e-4f) {
+        mainBus.applyGainRamp(0, numSamples, prevInGain, inGainLin);
+        prevInGain = inGainLin;
+    } else {
+        mainBus.applyGain(inGainLin);
+    }
+
+    // =========================================================================
+    // 4. WET ПУТЬ: СПЕКТРАЛЬНАЯ ОБРАБОТКА
+    // =========================================================================
+    float upMax   = *pUpRange;
+    float downMax = -(*pDownRange);
+    float amount  = *pAmount;
+    float speed   = *pSpeed;
+    float smooth  = *pSmooth;
+    float upSel   = *pUpSel;
+    float downSel = *pDownSel;
+
+    bool engineDirty = false;
+
+    int fftMode = static_cast<int>(*pFftMode);
+    if (fftMode != prevFFTMode) {
+        prevFFTMode = fftMode;
+        currentFFTSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
+        spectralEngine.switchFFTSize(currentFFTSize);
+        setLatencySamples(currentFFTSize);
+
+        for (int i = 0; i < MAX_FFT_BINS; ++i) {
+            spectrumDataLeft[i].store(-100.0f, std::memory_order_relaxed);
+            compressionDeltaData[i].store(0.0f, std::memory_order_relaxed);
+            sidechainData[i].store(-100.0f, std::memory_order_relaxed);
+        }
+
+        engineDirty = true;
+        spectralEngine.invalidateTarget();
+        updateHostDisplay();
+    }
+
+    engineDirty |= syncGradientPointsFromAPVTS();
+
     if (upMax != prevUpMax || downMax != prevDownMax || amount != prevAmount || 
-        speed != prevSpeed || smooth != prevSmooth) 
+        speed != prevSpeed || smooth != prevSmooth || upSel != prevUpSel || downSel != prevDownSel) 
     {
         engineDirty = true;
         prevUpMax = upMax; prevDownMax = downMax; prevAmount = amount;
-        prevSpeed = speed; prevSmooth = smooth;
+        prevSpeed = speed; prevSmooth = smooth; prevUpSel = upSel; prevDownSel = downSel;
     }
 
-    // Если трогал — пересчитываем массивы коэффициентов
     if (engineDirty) {
-        spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, 
-                                        audioThreadGradients, getSampleRate());
+        spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, upSel, downSel, audioThreadGradients, getSampleRate());
     }
 
-    // Сигнатура process стала чище, передаем только буферы
-    auto mainBuffer = getBusBuffer(buffer, true, 0);
-    auto sidechainBuffer = getBusBuffer(buffer, true, 1);
+    spectralEngine.process(mainBus, hasSidechain ? &sidechainBus : nullptr, *pThresh, spectrumDataLeft, compressionDeltaData, sidechainData);
 
-    bool hasSidechain = (getBusCount(true) > 1 && 
-                         getBus(true, 1)->isEnabled() && 
-                         sidechainBuffer.getNumChannels() > 0);
+    visualFFTSize.store(currentFFTSize, std::memory_order_release);
 
-    spectralEngine.process(mainBuffer, 
-                           hasSidechain ? &sidechainBuffer : nullptr, 
-                           apvts, spectrumDataLeft, compressionDeltaData);
+    float outLvlDb = *pOutLvl;
+    const float outGainLin = juce::Decibels::decibelsToGain(outLvlDb);
+    const float outGainStart = prevOutGain;
 
-    static int debugCounter = 0;
-    if (++debugCounter >= 100) {
-        debugCounter = 0;
+    if (std::abs(outGainLin - prevOutGain) > 1.0e-4f) {
+        mainBus.applyGainRamp(0, numSamples, prevOutGain, outGainLin);
+        prevOutGain = outGainLin;
+    } else {
+        mainBus.applyGain(outGainLin);
+    }
 
-        float minDelta = 999.0f, maxDelta = -999.0f, avgDelta = 0.0f;
-        int validBins = 0;
+    float mixPct = *pMix;
+    smoothedMix.setTargetValue(mixPct / 100.0f);
+    bool deltaMode = *pDeltaMode > 0.5f;
 
-        for (int i = 10; i < 200; ++i) {
-            float delta = compressionDeltaData[i].load(std::memory_order_relaxed);
-            if (std::abs(delta) < 30.0f) {
-                minDelta = juce::jmin(minDelta, delta);
-                maxDelta = juce::jmax(maxDelta, delta);
-                avgDelta += delta;
-                ++validBins;
+    for (int i = 0; i < numSamples; ++i) {
+        float mixWet = smoothedMix.getNextValue();
+        float mixDry = 1.0f - mixWet;
+
+        for (int ch = 0; ch < mainChannels; ++ch) {
+            auto* wet = mainBus.getWritePointer(ch);
+            const auto* dry = delayedDryBuffer.getReadPointer(ch);
+            
+            float fullyProcessedWet = wet[i]; 
+
+            if (deltaMode) {
+                const float t = numSamples > 1
+                              ? static_cast<float>(i) / static_cast<float>(numSamples - 1)
+                              : 1.0f;
+
+                const float inGainAt =
+                    inGainStart + (inGainLin - inGainStart) * t;
+
+                const float outGainAt =
+                    outGainStart + (outGainLin - outGainStart) * t;
+
+                const float unprocessedWetReference =
+                    dry[i] * inGainAt * outGainAt;
+
+                wet[i] = fullyProcessedWet - unprocessedWetReference;
+            } else {
+                wet[i] = (fullyProcessedWet * mixWet) + (dry[i] * mixDry);
             }
         }
-
-        if (validBins > 0) {
-            avgDelta /= validBins;
-
-            DBG("=== GAIN STAGING ===");
-            DBG("Input level: " + juce::String(juce::Decibels::gainToDecibels(buffer.getRMSLevel(0, 0, buffer.getNumSamples())), 1) + " dB");
-            DBG("Min gain delta: " + juce::String(minDelta, 2) + " dB");
-            DBG("Max gain delta: " + juce::String(maxDelta, 2) + " dB");
-            DBG("Avg gain delta: " + juce::String(avgDelta, 2) + " dB");
-            DBG("===================");
-        }
     }
 
-    // 4. Dry/wet mix с плавным сглаживанием (РЕШАЕТ ЩЕЛЧКИ ПРИ АВТОМАТИЗАЦИИ)
-    for (int ch = 0; ch < numChannels; ++ch)
-    {
-        auto* wet = buffer.getWritePointer(ch);
-        const auto* dry = delayedDryBuffer.getReadPointer(ch);
-        
-        for (int i = 0; i < numSamples; ++i)
-        {
-            float mixWet = smoothedMix.getNextValue();
-            float mixDry = 1.0f - mixWet;
-            wet[i] = wet[i] * mixWet + dry[i] * mixDry;
-        }
-    }
-
-    // 5. Output gain c плавным кроссфейдом (убирает щелчки)
-    float outLvlDb = *apvts.getRawParameterValue("OUT_LVL");
-    const float outGainLin = juce::Decibels::decibelsToGain(outLvlDb);
-    if (std::abs(outGainLin - prevOutGain) > 1.0e-4f)
-    {
-        buffer.applyGainRamp(0, numSamples, prevOutGain, outGainLin);
-        prevOutGain = outGainLin;
-    }
-    else
-    {
-        buffer.applyGain(outGainLin);
+    for (int ch = mainChannels; ch < buffer.getNumChannels(); ++ch) {
+        buffer.clear(ch, 0, numSamples);
     }
 }
 
@@ -349,7 +434,41 @@ void TroakarSpectralAudioProcessor::setStateInformation (const void* data, int s
 {
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
     if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
+    {
         apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+        
+        gradientManager.points.clear();
+        
+        for (int i = 0; i < 4; ++i)
+        {
+            juce::String prefix = "GRADIENT_" + juce::String(i);
+            
+            if (*apvts.getRawParameterValue(prefix + "_ENABLE") > 0.5f)
+            {
+                GradientPoint pt;
+                pt.id = i;
+                pt.name = "G" + juce::String(i + 1);
+                pt.color = gradientManager.availableColors[i % gradientManager.availableColors.size()];
+                pt.active = true;
+                pt.isSelected = false;
+                
+                pt.centerFreqHz    = *apvts.getRawParameterValue(prefix + "_CENTER_FREQ");
+                pt.centerGainDb    = *apvts.getRawParameterValue(prefix + "_CENTER_GAIN");
+                pt.radiusOctaves   = *apvts.getRawParameterValue(prefix + "_BANDWIDTH");
+                pt.amountPct       = *apvts.getRawParameterValue(prefix + "_AMOUNT");
+                pt.upMaxDb         = *apvts.getRawParameterValue(prefix + "_UP_MAX");
+                pt.downMaxDb       = -(*apvts.getRawParameterValue(prefix + "_DOWN_MAX"));
+                pt.speedPct        = *apvts.getRawParameterValue(prefix + "_SPEED");
+                pt.smoothPct       = *apvts.getRawParameterValue(prefix + "_SMOOTH");
+                pt.upSelectivity   = *apvts.getRawParameterValue(prefix + "_UP_SEL");
+                pt.downSelectivity = *apvts.getRawParameterValue(prefix + "_DOWN_SEL");
+                
+                gradientManager.points.push_back(pt);
+            }
+        }
+
+        spectralEngine.invalidateTarget();
+    }
 }
 
 bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
@@ -357,23 +476,25 @@ bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
     bool changed = false;
     for (size_t i = 0; i < audioThreadGradients.size() && i < 4; ++i)
     {
-        juce::String prefix = "GRADIENT_" + juce::String((int)i);
         auto& point = audioThreadGradients[i];
 
-        bool  active = *apvts.getRawParameterValue(prefix + "_ENABLE") > 0.5f;
-        float freq   = *apvts.getRawParameterValue(prefix + "_CENTER_FREQ");
-        float gain   = *apvts.getRawParameterValue(prefix + "_CENTER_GAIN");
-        float bw     = *apvts.getRawParameterValue(prefix + "_BANDWIDTH");
-        float amt    = *apvts.getRawParameterValue(prefix + "_AMOUNT");
-        float up     = *apvts.getRawParameterValue(prefix + "_UP_MAX");
-        float dn     = *apvts.getRawParameterValue(prefix + "_DOWN_MAX");
-        float spd    = *apvts.getRawParameterValue(prefix + "_SPEED");
-        float sm     = *apvts.getRawParameterValue(prefix + "_SMOOTH");
+        bool  active = *pGradEnable[i] > 0.5f;
+        float freq   = *pGradFreq[i];
+        float gain   = *pGradGain[i];
+        float bw     = *pGradBw[i];
+        float amt    = *pGradAmt[i];
+        float up     = *pGradUpMax[i];
+        float dn     = -(*pGradDownMax[i]);
+        float spd    = *pGradSpeed[i];
+        float sm     = *pGradSmooth[i];
+        float upSel  = *pGradUpSel[i];
+        float dnSel  = *pGradDownSel[i];
 
         if (point.active != active || point.centerFreqHz != freq || point.centerGainDb != gain ||
             point.radiusOctaves != bw || point.amountPct != amt ||
             point.upMaxDb != up || point.downMaxDb != dn ||
-            point.speedPct != spd || point.smoothPct != sm) 
+            point.speedPct != spd || point.smoothPct != sm ||
+            point.upSelectivity != upSel || point.downSelectivity != dnSel) 
         {
             changed = true;
             point.active = active;
@@ -385,6 +506,8 @@ bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
             point.downMaxDb = dn;
             point.speedPct = spd;
             point.smoothPct = sm;
+            point.upSelectivity = upSel;
+            point.downSelectivity = dnSel;
         }
     }
     return changed;
@@ -392,14 +515,16 @@ bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
 
 void TroakarSpectralAudioProcessor::syncGradientPointsToAPVTS()
 {
-    for (size_t i = 0; i < 4; ++i)
+    for (int i = 0; i < 4; ++i)
     {
-        juce::String prefix = "GRADIENT_" + juce::String((int)i);
+        juce::String prefix = "GRADIENT_" + juce::String(i);
         auto* enableParam = apvts.getParameter(prefix + "_ENABLE");
         
-        if (i < gradientManager.points.size())
+        auto* pointPtr = gradientManager.getPoint(i);
+        
+        if (pointPtr != nullptr)
         {
-            const auto& point = gradientManager.points[i];
+            const auto& point = *pointPtr;
             auto* freqParam   = apvts.getParameter(prefix + "_CENTER_FREQ");
             auto* gainParam   = apvts.getParameter(prefix + "_CENTER_GAIN");
             auto* bwParam     = apvts.getParameter(prefix + "_BANDWIDTH");
@@ -408,16 +533,20 @@ void TroakarSpectralAudioProcessor::syncGradientPointsToAPVTS()
             auto* downParam   = apvts.getParameter(prefix + "_DOWN_MAX");
             auto* speedParam  = apvts.getParameter(prefix + "_SPEED");
             auto* smoothParam = apvts.getParameter(prefix + "_SMOOTH");
+            auto* upSelParam  = apvts.getParameter(prefix + "_UP_SEL");
+            auto* dnSelParam  = apvts.getParameter(prefix + "_DOWN_SEL");
 
-            enableParam->setValueNotifyingHost(point.active ? 1.0f : 0.0f);
+            enableParam->setValueNotifyingHost(1.0f);
             freqParam->setValueNotifyingHost(freqParam->convertTo0to1(point.centerFreqHz));
             gainParam->setValueNotifyingHost(gainParam->convertTo0to1(point.centerGainDb));
             bwParam->setValueNotifyingHost(bwParam->convertTo0to1(point.radiusOctaves));
             amountParam->setValueNotifyingHost(amountParam->convertTo0to1(point.amountPct));
             upParam->setValueNotifyingHost(upParam->convertTo0to1(point.upMaxDb));
-            downParam->setValueNotifyingHost(downParam->convertTo0to1(point.downMaxDb));
+            downParam->setValueNotifyingHost(downParam->convertTo0to1(-point.downMaxDb));
             speedParam->setValueNotifyingHost(speedParam->convertTo0to1(point.speedPct));
             smoothParam->setValueNotifyingHost(smoothParam->convertTo0to1(point.smoothPct));
+            upSelParam->setValueNotifyingHost(upSelParam->convertTo0to1(point.upSelectivity));
+            dnSelParam->setValueNotifyingHost(dnSelParam->convertTo0to1(point.downSelectivity));
         }
         else
         {
