@@ -66,6 +66,9 @@ private:
 
         for (auto& p : gradientManager.points) {
             juce::String prefix = "GRADIENT_" + juce::String(p.id);
+            
+            p.active          = *processor.apvts.getRawParameterValue(prefix + "_ENABLE") > 0.5f;
+            
             p.centerFreqHz    = *processor.apvts.getRawParameterValue(prefix + "_CENTER_FREQ");
             p.centerGainDb    = *processor.apvts.getRawParameterValue(prefix + "_CENTER_GAIN");
             p.radiusOctaves   = *processor.apvts.getRawParameterValue(prefix + "_BANDWIDTH");

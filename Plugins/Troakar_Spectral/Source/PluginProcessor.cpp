@@ -359,6 +359,42 @@ void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int sample
 
     smoothedMix.reset(sampleRate, 0.04);
 
+    // =========================================================================
+    // Принудительная синхронизация всех параметров в движок после инициализации
+    // =========================================================================
+    
+    float upMax   = *pUpRange;
+    float downMax = -(*pDownRange);
+    float amount  = *pAmount;
+    float speed   = *pSpeed;
+    float smooth  = *pSmooth;
+    float upSel   = *pUpSel;
+    float downSel = *pDownSel;
+    bool  speedAuto = *pSpeedAuto > 0.5f;
+    float attackMs  = *pAttackMs;
+    float releaseMs = *pReleaseMs;
+    float kneeWidth = *pKneeWidth;
+    float lookahead = *pLookaheadMs;
+
+    syncGradientPointsFromAPVTS();
+
+    spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, upSel, downSel,
+                                    speedAuto, attackMs, releaseMs, kneeWidth, lookahead,
+                                    audioThreadGradients, getSampleRate());
+
+    prevUpMax = upMax; 
+    prevDownMax = downMax; 
+    prevAmount = amount;
+    prevSpeed = speed; 
+    prevSmooth = smooth; 
+    prevUpSel = upSel; 
+    prevDownSel = downSel;
+    prevSpeedAuto = speedAuto;
+    prevAttackMs = attackMs; 
+    prevReleaseMs = releaseMs; 
+    prevKneeWidth = kneeWidth; 
+    prevLookaheadMs = lookahead;
+
     setLatencySamples(currentFFTSize + spectralEngine.getLookaheadSamples());
 }
 
@@ -434,6 +470,7 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     if (fftMode != prevFFTMode) {
         prevFFTMode = fftMode;
         currentFFTSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
+        
         spectralEngine.switchFFTSize(currentFFTSize);
         dryDelay.setDelay(currentFFTSize); 
 
@@ -443,7 +480,12 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             sidechainData[i].store(-100.0f, std::memory_order_relaxed);
         }
 
-        engineDirty = true;
+        visualFFTSize.store(currentFFTSize, std::memory_order_release);
+
+        syncGradientPointsFromAPVTS();
+        spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, upSel, downSel,
+                                        speedAuto, attackMs, releaseMs, kneeWidth, lookahead,
+                                        audioThreadGradients, getSampleRate());
         spectralEngine.invalidateTarget();
 
         requiresLatencyUpdate.store(true);
@@ -586,52 +628,62 @@ void TroakarSpectralAudioProcessor::setStateInformation (const void* data, int s
 bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
 {
     bool changed = false;
+
     for (size_t i = 0; i < 4; ++i)
     {
         auto& point = audioThreadGradients[i];
 
-        bool  active = *pGradEnable[i] > 0.5f;
-        float freq   = *pGradFreq[i];
-        float gain   = *pGradGain[i];
-        float bw     = *pGradBw[i];
-        float amt    = *pGradAmt[i];
-        float up     = *pGradUpMax[i];
-        float dn     = -(*pGradDownMax[i]);
-        float spd    = *pGradSpeed[i];
-        float sm     = *pGradSmooth[i];
-        float upSel  = *pGradUpSel[i];
-        float dnSel  = *pGradDownSel[i];
+        bool  active  = *pGradEnable[i] > 0.5f;
+        float freq    = *pGradFreq[i];
+        float gain    = *pGradGain[i];
+        float bw      = *pGradBw[i];
+        float amt     = *pGradAmt[i];
+        float up      = *pGradUpMax[i];
+        float dn      = -std::abs(*pGradDownMax[i]); // Гарантируем строго отрицательный dB для Downward
+        float spd     = *pGradSpeed[i];
+        float sm      = *pGradSmooth[i];
+        float upSel   = *pGradUpSel[i];
+        float dnSel   = *pGradDownSel[i];
         bool  autoSpd = *pGradAutoSpeed[i] > 0.5f;
         float atk     = *pGradAttack[i];
         float rel     = *pGradRelease[i];
         float knee    = *pGradKnee[i];
 
-        if (point.active != active || point.centerFreqHz != freq || point.centerGainDb != gain ||
-            point.radiusOctaves != bw || point.amountPct != amt ||
-            point.upMaxDb != up || point.downMaxDb != dn ||
-            point.speedPct != spd || point.smoothPct != sm ||
-            point.upSelectivity != upSel || point.downSelectivity != dnSel ||
-            point.useAutoSpeed != autoSpd || point.attackMs != atk || 
-            point.releaseMs != rel || point.kneeWidthDb != knee) 
+        if (point.active != active ||
+            std::abs(point.centerFreqHz - freq) > 0.01f ||
+            std::abs(point.centerGainDb - gain) > 0.01f ||
+            std::abs(point.radiusOctaves - bw) > 0.001f ||
+            std::abs(point.amountPct - amt) > 0.01f ||
+            std::abs(point.upMaxDb - up) > 0.01f ||
+            std::abs(point.downMaxDb - dn) > 0.01f ||
+            std::abs(point.speedPct - spd) > 0.01f ||
+            std::abs(point.smoothPct - sm) > 0.01f ||
+            std::abs(point.upSelectivity - upSel) > 0.01f ||
+            std::abs(point.downSelectivity - dnSel) > 0.01f ||
+            point.useAutoSpeed != autoSpd ||
+            std::abs(point.attackMs - atk) > 0.01f ||
+            std::abs(point.releaseMs - rel) > 0.01f ||
+            std::abs(point.kneeWidthDb - knee) > 0.01f)
         {
             changed = true;
-            point.active = active;
-            point.centerFreqHz = freq;
-            point.centerGainDb = gain;
-            point.radiusOctaves = bw;
-            point.amountPct = amt;
-            point.upMaxDb = up;
-            point.downMaxDb = dn;
-            point.speedPct = spd;
-            point.smoothPct = sm;
-            point.upSelectivity = upSel;
+            point.active          = active;
+            point.centerFreqHz    = freq;
+            point.centerGainDb    = gain;
+            point.radiusOctaves   = bw;
+            point.amountPct       = amt;
+            point.upMaxDb         = up;
+            point.downMaxDb       = dn;
+            point.speedPct        = spd;
+            point.smoothPct       = sm;
+            point.upSelectivity   = upSel;
             point.downSelectivity = dnSel;
-            point.useAutoSpeed = autoSpd;
-            point.attackMs = atk;
-            point.releaseMs = rel;
-            point.kneeWidthDb = knee;
+            point.useAutoSpeed    = autoSpd;
+            point.attackMs        = atk;
+            point.releaseMs       = rel;
+            point.kneeWidthDb     = knee;
         }
     }
+
     return changed;
 }
 
@@ -641,49 +693,32 @@ void TroakarSpectralAudioProcessor::syncGradientPointsToAPVTS()
     {
         juce::String prefix = "GRADIENT_" + juce::String(i);
         auto* enableParam = apvts.getParameter(prefix + "_ENABLE");
+        auto* pointPtr    = gradientManager.getPoint(i);
         
-        auto* pointPtr = gradientManager.getPoint(i);
-        
-        if (pointPtr != nullptr)
+        if (pointPtr != nullptr && pointPtr->active)
         {
-            const auto& point = *pointPtr;
             auto* freqParam   = apvts.getParameter(prefix + "_CENTER_FREQ");
             auto* gainParam   = apvts.getParameter(prefix + "_CENTER_GAIN");
             auto* bwParam     = apvts.getParameter(prefix + "_BANDWIDTH");
-            auto* amountParam = apvts.getParameter(prefix + "_AMOUNT");
-            auto* upParam     = apvts.getParameter(prefix + "_UP_MAX");
-            auto* downParam   = apvts.getParameter(prefix + "_DOWN_MAX");
-            auto* speedParam  = apvts.getParameter(prefix + "_SPEED");
-            auto* smoothParam = apvts.getParameter(prefix + "_SMOOTH");
-            auto* upSelParam  = apvts.getParameter(prefix + "_UP_SEL");
-            auto* dnSelParam  = apvts.getParameter(prefix + "_DOWN_SEL");
-            auto* autoSpeedParam = apvts.getParameter(prefix + "_AUTO_SPEED");
-            auto* attackParam    = apvts.getParameter(prefix + "_ATTACK");
-            auto* releaseParam   = apvts.getParameter(prefix + "_RELEASE");
-            auto* kneeParam      = apvts.getParameter(prefix + "_KNEE");
+            auto* autoSpdParam= apvts.getParameter(prefix + "_AUTO_SPEED");
 
-            enableParam->setValueNotifyingHost(1.0f);
-            freqParam->setValueNotifyingHost(freqParam->convertTo0to1(point.centerFreqHz));
-            gainParam->setValueNotifyingHost(gainParam->convertTo0to1(point.centerGainDb));
-            bwParam->setValueNotifyingHost(bwParam->convertTo0to1(point.radiusOctaves));
-            amountParam->setValueNotifyingHost(amountParam->convertTo0to1(point.amountPct));
-            upParam->setValueNotifyingHost(upParam->convertTo0to1(point.upMaxDb));
-            downParam->setValueNotifyingHost(downParam->convertTo0to1(-point.downMaxDb));
-            speedParam->setValueNotifyingHost(speedParam->convertTo0to1(point.speedPct));
-            smoothParam->setValueNotifyingHost(smoothParam->convertTo0to1(point.smoothPct));
-            upSelParam->setValueNotifyingHost(upSelParam->convertTo0to1(point.upSelectivity));
-            dnSelParam->setValueNotifyingHost(dnSelParam->convertTo0to1(point.downSelectivity));
-            
-            autoSpeedParam->setValueNotifyingHost(point.useAutoSpeed ? 1.0f : 0.0f);
-            attackParam->setValueNotifyingHost(attackParam->convertTo0to1(point.attackMs));
-            releaseParam->setValueNotifyingHost(releaseParam->convertTo0to1(point.releaseMs));
-            kneeParam->setValueNotifyingHost(kneeParam->convertTo0to1(point.kneeWidthDb));
+            if (enableParam && enableParam->getValue() < 0.5f)
+                enableParam->setValueNotifyingHost(1.0f);
+
+            if (freqParam)
+                freqParam->setValueNotifyingHost(freqParam->convertTo0to1(pointPtr->centerFreqHz));
+            if (gainParam)
+                gainParam->setValueNotifyingHost(gainParam->convertTo0to1(pointPtr->centerGainDb));
+            if (bwParam)
+                bwParam->setValueNotifyingHost(bwParam->convertTo0to1(pointPtr->radiusOctaves));
+            if (autoSpdParam)
+                autoSpdParam->setValueNotifyingHost(pointPtr->useAutoSpeed ? 1.0f : 0.0f);
         }
         else
         {
-            enableParam->setValueNotifyingHost(0.0f);
+            if (enableParam && enableParam->getValue() > 0.5f)
+                enableParam->setValueNotifyingHost(0.0f);
         }
-    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

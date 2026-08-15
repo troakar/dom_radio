@@ -29,6 +29,13 @@ EQGraphLED::EQGraphLED(TroakarSpectralAudioProcessor& p)
     processor.apvts.addParameterListener("GLOBAL_THRESH", paramListener.get());
     processor.apvts.addParameterListener("FFT_MODE", paramListener.get());
     processor.apvts.addParameterListener("VIEW_RANGE", paramListener.get());
+    for (int g = 0; g < 4; ++g) {
+        juce::String prefix = "GRADIENT_" + juce::String(g);
+        processor.apvts.addParameterListener(prefix + "_ENABLE", paramListener.get());
+        processor.apvts.addParameterListener(prefix + "_CENTER_FREQ", paramListener.get());
+        processor.apvts.addParameterListener(prefix + "_CENTER_GAIN", paramListener.get());
+        processor.apvts.addParameterListener(prefix + "_BANDWIDTH", paramListener.get());
+    }
     lastFFTMode = static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
     updateViewRange(static_cast<int>(*processor.apvts.getRawParameterValue("VIEW_RANGE")));
 }
@@ -46,6 +53,13 @@ EQGraphLED::~EQGraphLED()
         processor.apvts.removeParameterListener("GLOBAL_THRESH", paramListener.get());
         processor.apvts.removeParameterListener("FFT_MODE", paramListener.get());
         processor.apvts.removeParameterListener("VIEW_RANGE", paramListener.get());
+        for (int g = 0; g < 4; ++g) {
+            juce::String prefix = "GRADIENT_" + juce::String(g);
+            processor.apvts.removeParameterListener(prefix + "_ENABLE", paramListener.get());
+            processor.apvts.removeParameterListener(prefix + "_CENTER_FREQ", paramListener.get());
+            processor.apvts.removeParameterListener(prefix + "_CENTER_GAIN", paramListener.get());
+            processor.apvts.removeParameterListener(prefix + "_BANDWIDTH", paramListener.get());
+        }
     }
 }
 float EQGraphLED::freqToX(float f) const  { return std::log10(juce::jlimit(20.0f, 20000.0f, f) / 20.0f) / 3.0f * (float)getWidth(); }
@@ -290,8 +304,23 @@ void EQGraphLED::updateTargetCurveCache()
             totalMagSq *= filters[f].getMagSq(cw, c2w);
 
         float eqDb = static_cast<float>(10.0 * std::log10(std::max(1.0e-15, totalMagSq)));
-        
-        float totalCurveDb = eqDb + globalThresh; 
+
+        float gradThreshOffset = 0.0f;
+        for (const auto& gp : gradientManager.points)
+        {
+            if (!gp.active) continue;
+
+            float logDist = std::abs(std::log2(static_cast<float>(freq) / gp.centerFreqHz));
+            float normalizedDist = logDist / gp.radiusOctaves;
+
+            if (normalizedDist < 1.0f)
+            {
+                float weight = 0.5f + 0.5f * std::cos(normalizedDist * juce::MathConstants<float>::pi);
+                gradThreshOffset += gp.centerGainDb * weight;
+            }
+        }
+
+        float totalCurveDb = eqDb + globalThresh + gradThreshOffset; 
         targetDbPerPixel[x] = totalCurveDb;
 
         if (x % 4 == 0 || x == w)
@@ -399,14 +428,15 @@ float EQGraphLED::getTargetCurveDb(double freq) const
 
 float EQGraphLED::getInterpolatedArray(const std::atomic<float>* arr, double freq, double sr) const
 {
-    const int fftSize = processor.getCurrentFFTSize();
+    const int fftMode = static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
+    const int fftSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
     const int maxBin = (fftSize / 2) - 2;
 
-    float fBin = (float)(freq * (double)fftSize / sr);
+    float fBin = static_cast<float>(freq * static_cast<double>(fftSize) / sr);
     if (fBin < 1.0f) return arr[1].load(std::memory_order_relaxed);
     if (fBin > (float)maxBin) return arr[maxBin].load(std::memory_order_relaxed);
 
-    int idx = (int)fBin;
+    int idx = static_cast<int>(fBin);
     float frac = fBin - (float)idx;
 
     float v1 = arr[idx].load(std::memory_order_relaxed);
@@ -436,10 +466,14 @@ juce::Path& EQGraphLED::buildTargetCurvePath() const
 
 void EQGraphLED::drawSpectrumFog(juce::Graphics& g, const juce::Rectangle<float>& bounds)
 {
+    if (!processor.isEngineSettled())
+        return;
+
     const int w = getWidth();
     if (w <= 0) return;
 
-    const int fftSize = processor.getCurrentFFTSize();
+    const int fftMode = static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
+    const int fftSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
     const double sr = juce::jmax(44100.0, processor.getSampleRate());
     const int numBins = fftSize / 2;
     const double binWidthHz = sr / static_cast<double>(fftSize);
