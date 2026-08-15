@@ -18,7 +18,8 @@ TroakarSpectralAudioProcessor::TroakarSpectralAudioProcessor()
     pUpRange   = apvts.getRawParameterValue("UPWARD_RANGE");
     pDownRange = apvts.getRawParameterValue("DOWNWARD_RANGE");
     pSpeed     = apvts.getRawParameterValue("SPECTRAL_SPEED");
-    pSmooth    = apvts.getRawParameterValue("SMOOTHING");
+    pUpSmooth   = apvts.getRawParameterValue("UP_SMOOTH");
+    pDownSmooth = apvts.getRawParameterValue("DOWN_SMOOTH");
     pUpSel     = apvts.getRawParameterValue("UP_SEL");
     pDownSel   = apvts.getRawParameterValue("DOWN_SEL");
     pFftMode   = apvts.getRawParameterValue("FFT_MODE");
@@ -41,7 +42,8 @@ TroakarSpectralAudioProcessor::TroakarSpectralAudioProcessor()
         pGradUpMax[i]   = apvts.getRawParameterValue(prefix + "_UP_MAX");
         pGradDownMax[i] = apvts.getRawParameterValue(prefix + "_DOWN_MAX");
         pGradSpeed[i]   = apvts.getRawParameterValue(prefix + "_SPEED");
-        pGradSmooth[i]  = apvts.getRawParameterValue(prefix + "_SMOOTH");
+        pGradUpSmooth[i]   = apvts.getRawParameterValue(prefix + "_UP_SMOOTH");
+        pGradDownSmooth[i] = apvts.getRawParameterValue(prefix + "_DOWN_SMOOTH");
         pGradUpSel[i]   = apvts.getRawParameterValue(prefix + "_UP_SEL");
         pGradDownSel[i] = apvts.getRawParameterValue(prefix + "_DOWN_SEL");
         pGradAutoSpeed[i] = apvts.getRawParameterValue(prefix + "_AUTO_SPEED");
@@ -89,6 +91,32 @@ TroakarSpectralAudioProcessor::~TroakarSpectralAudioProcessor()
         apvts.removeParameterListener(prefix + "_GAIN", this);
         apvts.removeParameterListener(prefix + "_Q", this);
     }
+}
+
+int TroakarSpectralAudioProcessor::getFFTModeIndex() const noexcept
+{
+    if (auto* parameter = apvts.getParameter("FFT_MODE"))
+    {
+        if (auto* choice =
+            dynamic_cast<const juce::AudioParameterChoice*>(parameter))
+        {
+            return choice->getIndex();
+        }
+    }
+    return 0;
+}
+
+int TroakarSpectralAudioProcessor::getViewRangeIndex() const noexcept
+{
+    if (auto* parameter = apvts.getParameter("VIEW_RANGE"))
+    {
+        if (auto* choice =
+            dynamic_cast<const juce::AudioParameterChoice*>(parameter))
+        {
+            return choice->getIndex();
+        }
+    }
+    return 3;
 }
 
 void TroakarSpectralAudioProcessor::parameterChanged (const juce::String& parameterID, float /*newValue*/)
@@ -155,8 +183,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
         FloatAttr().withStringFromValueFunction(pctFormat)));
     
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "SMOOTHING", "Freq Smoothing", 
-        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 20.0f, 
+        "UP_SMOOTH", "Upward Smoothing", 
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 50.0f, 
+        FloatAttr().withStringFromValueFunction(pctFormat)));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "DOWN_SMOOTH", "Downward Smoothing", 
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 15.0f, 
         FloatAttr().withStringFromValueFunction(pctFormat)));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -239,8 +272,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
             FloatAttr().withStringFromValueFunction(pctFormat)));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
-            idPrefix + "_SMOOTH", namePrefix + " Smooth",
-            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 20.0f,
+            idPrefix + "_UP_SMOOTH", namePrefix + " Up Smooth",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 50.0f,
+            FloatAttr().withStringFromValueFunction(pctFormat)));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            idPrefix + "_DOWN_SMOOTH", namePrefix + " Down Smooth",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f), 15.0f,
             FloatAttr().withStringFromValueFunction(pctFormat)));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -338,13 +376,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 
 void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    const int fftMode = getFFTModeIndex();
+    currentFFTSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
+    prevFFTMode = fftMode;
+
     spectralEngine.prepare(sampleRate);
+    spectralEngine.switchFFTSize(currentFFTSize);
     visualFFTSize.store(currentFFTSize, std::memory_order_release);
 
     for (int i = 0; i < MAX_FFT_BINS; ++i) {
-        spectrumDataLeft[i].store(-100.0f, std::memory_order_relaxed);
+        spectrumDataLeft[i].store(0.0f, std::memory_order_relaxed);
         compressionDeltaData[i].store(0.0f, std::memory_order_relaxed);
-        sidechainData[i].store(-100.0f, std::memory_order_relaxed);
+        sidechainData[i].store(0.0f, std::memory_order_relaxed);
     }
 
     juce::dsp::ProcessSpec spec;
@@ -352,7 +395,8 @@ void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int sample
     spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
     spec.numChannels = 2;
     dryDelay.prepare(spec);
-    dryDelay.setDelay(currentFFTSize);
+    dryDelay.reset();
+    dryDelay.setDelay(static_cast<float>(currentFFTSize));
 
     delayedDryBuffer.setSize(2, MAX_BLOCK_SIZE);
     delayedDryBuffer.clear();
@@ -367,7 +411,8 @@ void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int sample
     float downMax = -(*pDownRange);
     float amount  = *pAmount;
     float speed   = *pSpeed;
-    float smooth  = *pSmooth;
+    float upSmooth   = *pUpSmooth;
+    float downSmooth = *pDownSmooth;
     float upSel   = *pUpSel;
     float downSel = *pDownSel;
     bool  speedAuto = *pSpeedAuto > 0.5f;
@@ -378,15 +423,17 @@ void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int sample
 
     syncGradientPointsFromAPVTS();
 
-    spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, upSel, downSel,
-                                    speedAuto, attackMs, releaseMs, kneeWidth, lookahead,
-                                    audioThreadGradients, getSampleRate());
+    spectralEngine.updateParameters(upMax, downMax, amount, speed, 
+        upSmooth, downSmooth, upSel, downSel,
+        speedAuto, attackMs, releaseMs, kneeWidth, lookahead,
+        audioThreadGradients, getSampleRate());
 
     prevUpMax = upMax; 
     prevDownMax = downMax; 
     prevAmount = amount;
     prevSpeed = speed; 
-    prevSmooth = smooth; 
+    prevUpSmooth = upSmooth; 
+    prevDownSmooth = downSmooth; 
     prevUpSel = upSel; 
     prevDownSel = downSel;
     prevSpeedAuto = speedAuto;
@@ -454,7 +501,8 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     float downMax = -(*pDownRange);
     float amount  = *pAmount;
     float speed   = *pSpeed;
-    float smooth  = *pSmooth;
+    float upSmooth   = *pUpSmooth;
+    float downSmooth = *pDownSmooth;
     float upSel   = *pUpSel;
     float downSel = *pDownSel;
 
@@ -466,26 +514,28 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
 
     bool engineDirty = false;
 
-    int fftMode = static_cast<int>(*pFftMode);
+    const int fftMode = getFFTModeIndex();
     if (fftMode != prevFFTMode) {
         prevFFTMode = fftMode;
         currentFFTSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
         
         spectralEngine.switchFFTSize(currentFFTSize);
-        dryDelay.setDelay(currentFFTSize); 
+        dryDelay.reset();
+        dryDelay.setDelay(static_cast<float>(currentFFTSize)); 
 
         for (int i = 0; i < MAX_FFT_BINS; ++i) {
-            spectrumDataLeft[i].store(-100.0f, std::memory_order_relaxed);
+            spectrumDataLeft[i].store(0.0f, std::memory_order_relaxed);
             compressionDeltaData[i].store(0.0f, std::memory_order_relaxed);
-            sidechainData[i].store(-100.0f, std::memory_order_relaxed);
+            sidechainData[i].store(0.0f, std::memory_order_relaxed);
         }
 
         visualFFTSize.store(currentFFTSize, std::memory_order_release);
 
         syncGradientPointsFromAPVTS();
-        spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, upSel, downSel,
-                                        speedAuto, attackMs, releaseMs, kneeWidth, lookahead,
-                                        audioThreadGradients, getSampleRate());
+        spectralEngine.updateParameters(upMax, downMax, amount, speed, 
+            upSmooth, downSmooth, upSel, downSel,
+            speedAuto, attackMs, releaseMs, kneeWidth, lookahead,
+            audioThreadGradients, getSampleRate());
         spectralEngine.invalidateTarget();
 
         requiresLatencyUpdate.store(true);
@@ -495,19 +545,20 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
     engineDirty |= syncGradientPointsFromAPVTS();
 
     if (upMax != prevUpMax || downMax != prevDownMax || amount != prevAmount || 
-        speed != prevSpeed || smooth != prevSmooth || upSel != prevUpSel || downSel != prevDownSel ||
+        speed != prevSpeed || upSmooth != prevUpSmooth || downSmooth != prevDownSmooth || upSel != prevUpSel || downSel != prevDownSel ||
         attackMs != prevAttackMs || releaseMs != prevReleaseMs || speedAuto != prevSpeedAuto ||
         kneeWidth != prevKneeWidth || lookahead != prevLookaheadMs) 
     {
         engineDirty = true;
         prevUpMax = upMax; prevDownMax = downMax; prevAmount = amount;
-        prevSpeed = speed; prevSmooth = smooth; prevUpSel = upSel; prevDownSel = downSel;
+        prevSpeed = speed; prevUpSmooth = upSmooth; prevDownSmooth = downSmooth; prevUpSel = upSel; prevDownSel = downSel;
         prevAttackMs = attackMs; prevReleaseMs = releaseMs; prevSpeedAuto = speedAuto;
         prevKneeWidth = kneeWidth; prevLookaheadMs = lookahead;
     }
 
     if (engineDirty) {
-        spectralEngine.updateParameters(upMax, downMax, amount, speed, smooth, upSel, downSel,
+        spectralEngine.updateParameters(upMax, downMax, amount, speed, 
+            upSmooth, downSmooth, upSel, downSel,
             *pSpeedAuto > 0.5f, *pAttackMs, *pReleaseMs, *pKneeWidth, *pLookaheadMs,
             audioThreadGradients, getSampleRate());
     }
@@ -608,7 +659,8 @@ void TroakarSpectralAudioProcessor::setStateInformation (const void* data, int s
                 pt.upMaxDb         = *apvts.getRawParameterValue(prefix + "_UP_MAX");
                 pt.downMaxDb       = -(*apvts.getRawParameterValue(prefix + "_DOWN_MAX"));
                 pt.speedPct        = *apvts.getRawParameterValue(prefix + "_SPEED");
-                pt.smoothPct       = *apvts.getRawParameterValue(prefix + "_SMOOTH");
+                pt.upSmoothPct     = *apvts.getRawParameterValue(prefix + "_UP_SMOOTH");
+                pt.downSmoothPct   = *apvts.getRawParameterValue(prefix + "_DOWN_SMOOTH");
                 pt.upSelectivity   = *apvts.getRawParameterValue(prefix + "_UP_SEL");
                 pt.downSelectivity = *apvts.getRawParameterValue(prefix + "_DOWN_SEL");
                 
@@ -641,7 +693,8 @@ bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
         float up      = *pGradUpMax[i];
         float dn      = -std::abs(*pGradDownMax[i]); // Гарантируем строго отрицательный dB для Downward
         float spd     = *pGradSpeed[i];
-        float sm      = *pGradSmooth[i];
+        float upSm    = *pGradUpSmooth[i];
+        float downSm  = *pGradDownSmooth[i];
         float upSel   = *pGradUpSel[i];
         float dnSel   = *pGradDownSel[i];
         bool  autoSpd = *pGradAutoSpeed[i] > 0.5f;
@@ -657,7 +710,8 @@ bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
             std::abs(point.upMaxDb - up) > 0.01f ||
             std::abs(point.downMaxDb - dn) > 0.01f ||
             std::abs(point.speedPct - spd) > 0.01f ||
-            std::abs(point.smoothPct - sm) > 0.01f ||
+            std::abs(point.upSmoothPct - upSm) > 0.01f ||
+            std::abs(point.downSmoothPct - downSm) > 0.01f ||
             std::abs(point.upSelectivity - upSel) > 0.01f ||
             std::abs(point.downSelectivity - dnSel) > 0.01f ||
             point.useAutoSpeed != autoSpd ||
@@ -674,7 +728,8 @@ bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()
             point.upMaxDb         = up;
             point.downMaxDb       = dn;
             point.speedPct        = spd;
-            point.smoothPct       = sm;
+            point.upSmoothPct     = upSm;
+            point.downSmoothPct   = downSm;
             point.upSelectivity   = upSel;
             point.downSelectivity = dnSel;
             point.useAutoSpeed    = autoSpd;
@@ -719,6 +774,7 @@ void TroakarSpectralAudioProcessor::syncGradientPointsToAPVTS()
             if (enableParam && enableParam->getValue() > 0.5f)
                 enableParam->setValueNotifyingHost(0.0f);
         }
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

@@ -104,7 +104,8 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     upRangeKnob   = std::make_unique<GradientKnob>(audioProcessor.apvts, "UPWARD_RANGE",   "UP MAX",    true);
     downRangeKnob = std::make_unique<GradientKnob>(audioProcessor.apvts, "DOWNWARD_RANGE", "DOWN MAX",  true);
     speedKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "SPECTRAL_SPEED", "SPEED",     true);
-    smoothKnob    = std::make_unique<GradientKnob>(audioProcessor.apvts, "SMOOTHING",      "SMOOTH",    true);
+    upSmoothKnob  = std::make_unique<GradientKnob>(audioProcessor.apvts, "UP_SMOOTH",    "UP SMOOTH",   true, true);
+    downSmoothKnob= std::make_unique<GradientKnob>(audioProcessor.apvts, "DOWN_SMOOTH",  "DN SMOOTH",   true, true);
     upSelKnob     = std::make_unique<GradientKnob>(audioProcessor.apvts, "UP_SEL",         "UP SEL",    true, true);
     downSelKnob   = std::make_unique<GradientKnob>(audioProcessor.apvts, "DOWN_SEL",       "DOWN SEL",  true, true);
 
@@ -142,7 +143,8 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     addAndMakeVisible(upRangeKnob.get());
     addAndMakeVisible(downRangeKnob.get());
     addAndMakeVisible(speedKnob.get());
-    addAndMakeVisible(smoothKnob.get());
+    addAndMakeVisible(upSmoothKnob.get());
+    addAndMakeVisible(downSmoothKnob.get());
     addAndMakeVisible(upSelKnob.get());
     addAndMakeVisible(downSelKnob.get());
 
@@ -182,7 +184,8 @@ void TroakarSpectralAudioProcessorEditor::updateKnobStates()
     amountKnob->setGradientActive(isGradientMode, currentCapColor);
     upRangeKnob->setGradientActive(isGradientMode, currentCapColor);
     downRangeKnob->setGradientActive(isGradientMode, currentCapColor);
-    smoothKnob->setGradientActive(isGradientMode, currentCapColor);
+    upSmoothKnob->setGradientActive(isGradientMode, currentCapColor);
+    downSmoothKnob->setGradientActive(isGradientMode, currentCapColor);
     upSelKnob->setGradientActive(isGradientMode, currentCapColor);
     downSelKnob->setGradientActive(isGradientMode, currentCapColor);
 
@@ -205,7 +208,8 @@ void TroakarSpectralAudioProcessorEditor::updateKnobStates()
         amountKnob->bindToParameter(audioProcessor.apvts, prefix + "_AMOUNT");
         upRangeKnob->bindToParameter(audioProcessor.apvts, prefix + "_UP_MAX");
         downRangeKnob->bindToParameter(audioProcessor.apvts, prefix + "_DOWN_MAX");
-        smoothKnob->bindToParameter(audioProcessor.apvts, prefix + "_SMOOTH");
+        upSmoothKnob->bindToParameter(audioProcessor.apvts, prefix + "_UP_SMOOTH");
+        downSmoothKnob->bindToParameter(audioProcessor.apvts, prefix + "_DOWN_SMOOTH");
         upSelKnob->bindToParameter(audioProcessor.apvts, prefix + "_UP_SEL");
         downSelKnob->bindToParameter(audioProcessor.apvts, prefix + "_DOWN_SEL");
         
@@ -222,7 +226,8 @@ void TroakarSpectralAudioProcessorEditor::updateKnobStates()
         amountKnob->bindToParameter(audioProcessor.apvts, "AMOUNT");
         upRangeKnob->bindToParameter(audioProcessor.apvts, "UPWARD_RANGE");
         downRangeKnob->bindToParameter(audioProcessor.apvts, "DOWNWARD_RANGE");
-        smoothKnob->bindToParameter(audioProcessor.apvts, "SMOOTHING");
+        upSmoothKnob->bindToParameter(audioProcessor.apvts, "UP_SMOOTH");
+        downSmoothKnob->bindToParameter(audioProcessor.apvts, "DOWN_SMOOTH");
         upSelKnob->bindToParameter(audioProcessor.apvts, "UP_SEL");
         downSelKnob->bindToParameter(audioProcessor.apvts, "DOWN_SEL");
         
@@ -234,14 +239,15 @@ void TroakarSpectralAudioProcessorEditor::updateKnobStates()
             kneeKnob->bindToParameter(audioProcessor.apvts, "KNEE_WIDTH");
         }
 
-        std::vector<GradientKnob::GradientMarker> amountMarkers, upMarkers, downMarkers, smoothMarkers, upSelMarkers, downSelMarkers;
+        std::vector<GradientKnob::GradientMarker> amountMarkers, upMarkers, downMarkers, upSmoothMarkers, downSmoothMarkers, upSelMarkers, downSelMarkers;
         std::vector<GradientKnob::GradientMarker> speedMarkers, attackMarkers, releaseMarkers, kneeMarkers;
         
         for (const auto& p : gradientManager.points) {
             amountMarkers.push_back({ p.id, p.amountPct / 300.0f, p.color });
             upMarkers.push_back({ p.id, p.upMaxDb / 48.0f, p.color });
             downMarkers.push_back({ p.id, (-p.downMaxDb) / 24.0f, p.color });
-            smoothMarkers.push_back({ p.id, p.smoothPct / 100.0f, p.color });
+            upSmoothMarkers.push_back({ p.id, p.upSmoothPct / 100.0f, p.color });
+            downSmoothMarkers.push_back({ p.id, p.downSmoothPct / 100.0f, p.color });
             upSelMarkers.push_back({ p.id, (p.upSelectivity + 100.0f) / 200.0f, p.color });
             downSelMarkers.push_back({ p.id, (p.downSelectivity + 100.0f) / 200.0f, p.color });
             
@@ -257,7 +263,8 @@ void TroakarSpectralAudioProcessorEditor::updateKnobStates()
         amountKnob->setGradientMarkers(amountMarkers);
         upRangeKnob->setGradientMarkers(upMarkers);
         downRangeKnob->setGradientMarkers(downMarkers);
-        smoothKnob->setGradientMarkers(smoothMarkers);
+        upSmoothKnob->setGradientMarkers(upSmoothMarkers);
+        downSmoothKnob->setGradientMarkers(downSmoothMarkers);
         upSelKnob->setGradientMarkers(upSelMarkers);
         downSelKnob->setGradientMarkers(downSelMarkers);
         
@@ -362,8 +369,10 @@ void TroakarSpectralAudioProcessorEditor::resized()
         kneeKnob->setBounds(timeBlock.reduced(2, 4));
     }
 
-    auto smoothArea = bottomPanel.removeFromLeft(blockW).reduced(4);
-    smoothKnob->setBounds(smoothArea);
+    // Колонка сглаживания (6-я колонка снизу)
+    auto smoothBlock = bottomPanel.removeFromLeft(blockW);
+    upSmoothKnob->setBounds(smoothBlock.removeFromTop(smoothBlock.getHeight() * 0.5f).reduced(6, 2));
+    downSmoothKnob->setBounds(smoothBlock.reduced(6, 2));
 
     auto lookArea = bottomPanel.reduced(4);
     lookaheadKnob->setBounds(lookArea);

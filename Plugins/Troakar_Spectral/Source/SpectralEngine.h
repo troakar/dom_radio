@@ -70,11 +70,9 @@ public:
         sr = sampleRate;
 
         for (int i = 0; i < 3; ++i) {
-            int size = 512 << i;
-            
-            // ИСПРАВЛЕНО: Честный order без урезания
-            int order = static_cast<int>(std::log2(size)); 
-            int numBins = size / 2;
+            const int size = 512 << i;
+            const int order = static_cast<int>(std::log2(size));
+            const int numBins = size / 2 + 1;
 
             fwdFFT[i] = std::make_unique<juce::dsp::FFT>(order);
             invFFT[i] = std::make_unique<juce::dsp::FFT>(order);
@@ -86,11 +84,11 @@ public:
             cos2W[i].assign(numBins, 0.0);
             lnFreqs[i].assign(numBins, 0.0f);
             for (int bin = 1; bin < numBins; ++bin) {
-                double w = 2.0 * juce::MathConstants<double>::pi * static_cast<double>(bin) / static_cast<double>(size);
+                const double w = 2.0 * juce::MathConstants<double>::pi * static_cast<double>(bin) / static_cast<double>(size);
                 cosW[i][bin] = std::cos(w);
                 cos2W[i][bin] = std::cos(2.0 * w);
 
-                float freq = (static_cast<float>(bin) / static_cast<float>(size)) * static_cast<float>(sampleRate);
+                const float freq = (static_cast<float>(bin) / static_cast<float>(size)) * static_cast<float>(sr);
                 lnFreqs[i][bin] = std::log(std::max(1.0f, freq));
             }
         }
@@ -105,13 +103,22 @@ public:
         rmsEnvBin.assign(maxBins, 0.0f);
         bandGainsBin.assign(maxBins, 1.0f);
         rawDeltaDb.assign(maxBins, 0.0f);
+        rawUpDeltaDb.assign(maxBins, 0.0f);
+        rawDownDeltaDb.assign(maxBins, 0.0f);
+        binUpSmoothCoef.assign(maxBins, 0.5f);
+        binDownSmoothCoef.assign(maxBins, 0.5f);
+        binUpSmoothNorm.assign(maxBins, 0.5f);
+        binDownSmoothNorm.assign(maxBins, 0.5f);
+        upSmoothingPrefixDb.assign(maxBins + 1, 0.0f);
+        downSmoothingPrefixDb.assign(maxBins + 1, 0.0f);
         binTargetDb.assign(maxBins, 0.0f);
         binPAtk.assign(maxBins, 1.0f);
         binPRel.assign(maxBins, 1.0f);
         binRAtk.assign(maxBins, 1.0f);
         binRRel.assign(maxBins, 1.0f);
         binEnvSpeed.assign(maxBins, 0.5f);
-        binSmoothCoef.assign(maxBins, 0.5f);
+        binUpSmoothCoef.assign(maxBins, 0.5f);
+        binDownSmoothCoef.assign(maxBins, 0.5f);
         binEffectiveAmount.assign(maxBins, 0.0f);
         binEffectiveUp.assign(maxBins, 0.0f);
         binEffectiveDown.assign(maxBins, 0.0f);
@@ -127,10 +134,20 @@ public:
         smoothedDelta.assign(maxBins, 0.0f);
         binWeightSum.assign(maxBins, 0.0f);
         binSpeedNorm.assign(maxBins, 0.0f);
-        binSmoothNorm.assign(maxBins, 0.0f);
+        binUpSmoothNorm.assign(maxBins, 0.0f);
+        binDownSmoothNorm.assign(maxBins, 0.0f);
         envPrefixDb.assign(MAX_FFT_BINS + 1, 0.0f);
 
-        gainSmoothingPrefixDb.assign(1025, 0.0f);
+        upSmoothingPrefixDb.assign(maxBins + 1, 0.0f);
+
+        mainMagMax.assign(MAX_FFT_BINS + 1, 0.0f);
+        sidechainMagMax.assign(MAX_FFT_BINS + 1, 0.0f);
+        finalDownDeltaBuf.assign(MAX_FFT_BINS, 0.0f);
+        finalUpDeltaBuf.assign(MAX_FFT_BINS, 0.0f);
+        binAttackMsAccum.assign(MAX_FFT_BINS, 0.0f);
+        binReleaseMsAccum.assign(MAX_FFT_BINS, 0.0f);
+        binKneeAccum.assign(MAX_FFT_BINS, 0.0f);
+        binAutoSpeedAccum.assign(MAX_FFT_BINS, 0.0f);
 
         lookaheadEnvBuffer.assign(2048, 0.0f);
         lookaheadWritePos = 0;
@@ -193,7 +210,8 @@ public:
     }
 
     void updateParameters(float globalUpMax, float globalDownMax, float globalAmountPct, 
-                          float globalSpeedPct, float globalSmoothPct,
+                          float globalSpeedPct, 
+                          float globalUpSmoothPct, float globalDownSmoothPct,
                           float globalUpSelPct, float globalDownSelPct,
                           bool globalAutoSpeed,
                           float globalAttackMs,
@@ -203,20 +221,22 @@ public:
                           const std::array<GradientPoint, 4>& points,
                           double sampleRate)
     {
-        const int numBins = currentFFTSize / 2;
+        const int numBins = currentFFTSize / 2 + 1;
         const float hopsPerSec = static_cast<float>(sampleRate) / currentHopSize;
         
-        float globalAmountNorm = juce::jlimit(0.0f, 3.0f, globalAmountPct / 100.0f);
-        float globalSpeedNorm  = juce::jlimit(0.0f, 1.0f, globalSpeedPct / 100.0f);
-        float globalSmoothNorm = juce::jlimit(0.0f, 1.0f, globalSmoothPct / 100.0f);
-        float globalUpSelNorm  = globalUpSelPct / 100.0f;
-        float globalDownSelNorm = globalDownSelPct / 100.0f;
+        float globalAmountNorm     = juce::jlimit(0.0f, 3.0f, globalAmountPct / 100.0f);
+        float globalSpeedNorm      = juce::jlimit(0.0f, 1.0f, globalSpeedPct / 100.0f);
+        float globalUpSmoothNorm   = juce::jlimit(0.0f, 1.0f, globalUpSmoothPct / 100.0f);
+        float globalDownSmoothNorm = juce::jlimit(0.0f, 1.0f, globalDownSmoothPct / 100.0f);
+        float globalUpSelNorm      = globalUpSelPct / 100.0f;
+        float globalDownSelNorm    = globalDownSelPct / 100.0f;
 
         lookaheadSamples = juce::jlimit(0, currentHopSize, static_cast<int>(lookaheadMs * sampleRate / 1000.0f));
 
         std::fill(binWeightSum.begin(), binWeightSum.begin() + numBins, 0.0f);
         std::fill(binSpeedNorm.begin(), binSpeedNorm.begin() + numBins, 0.0f);
-        std::fill(binSmoothNorm.begin(), binSmoothNorm.begin() + numBins, 0.0f);
+        std::fill(binUpSmoothNorm.begin(), binUpSmoothNorm.begin() + numBins, 0.0f);
+        std::fill(binDownSmoothNorm.begin(), binDownSmoothNorm.begin() + numBins, 0.0f);
         
         std::fill(binEffectiveAmount.begin(), binEffectiveAmount.begin() + numBins, 0.0f);
         std::fill(binEffectiveUp.begin(), binEffectiveUp.begin() + numBins, 0.0f);
@@ -225,10 +245,10 @@ public:
         std::fill(binEffectiveDownSel.begin(), binEffectiveDownSel.begin() + numBins, 0.0f);
         std::fill(binThreshOffsetDb.begin(), binThreshOffsetDb.begin() + numBins, 0.0f);
         
-        std::vector<float> binAttackMsAccum(numBins, 0.0f);
-        std::vector<float> binReleaseMsAccum(numBins, 0.0f);
-        std::vector<float> binKneeAccum(numBins, 0.0f);
-        std::vector<float> binAutoSpeedAccum(numBins, 0.0f);
+        std::fill(binAttackMsAccum.begin(), binAttackMsAccum.begin() + numBins, 0.0f);
+        std::fill(binReleaseMsAccum.begin(), binReleaseMsAccum.begin() + numBins, 0.0f);
+        std::fill(binKneeAccum.begin(), binKneeAccum.begin() + numBins, 0.0f);
+        std::fill(binAutoSpeedAccum.begin(), binAutoSpeedAccum.begin() + numBins, 0.0f);
         
         bool hasActiveGradients = false;
 
@@ -236,8 +256,9 @@ public:
             if (!point.active) continue;
             hasActiveGradients = true;
             
-            float ptAmt = juce::jlimit(0.0f, 3.0f, point.amountPct / 100.0f);
-            float ptSm  = point.smoothPct / 100.0f;
+            float ptAmt    = juce::jlimit(0.0f, 3.0f, point.amountPct / 100.0f);
+            float ptUpSm   = point.upSmoothPct / 100.0f;
+            float ptDownSm = point.downSmoothPct / 100.0f;
 
             for (int bin = 1; bin < numBins; ++bin) {
                 double freq = (double)bin * sampleRate / (double)currentFFTSize;
@@ -255,7 +276,8 @@ public:
                 binEffectiveUp[bin]     += point.upMaxDb * weight;
                 binEffectiveDown[bin]   += point.downMaxDb * weight;
                 binThreshOffsetDb[bin]  += point.centerGainDb * weight;
-                binSmoothNorm[bin]      += ptSm * weight;
+                binUpSmoothNorm[bin]    += ptUpSm * weight;
+                binDownSmoothNorm[bin]  += ptDownSm * weight;
                 binEffectiveUpSel[bin]  += (point.upSelectivity / 100.0f) * weight;
                 binEffectiveDownSel[bin]+= (point.downSelectivity / 100.0f) * weight;
                 
@@ -280,19 +302,21 @@ public:
             if (hasActiveGradients && totalW > 0.0001f) {
                 float invW = 1.0f / totalW;
                 
-                float localAmt = binEffectiveAmount[bin] * invW;
-                float localUp  = binEffectiveUp[bin] * invW;
-                float localDown = binEffectiveDown[bin] * invW;
-                float localSm  = binSmoothNorm[bin] * invW;
-                float localThresh = binThreshOffsetDb[bin] * invW;
-                float localUpSel = binEffectiveUpSel[bin] * invW;
-                float localDnSel = binEffectiveDownSel[bin] * invW;
-                float localKnee = binKneeAccum[bin] * invW;
+                float localAmt     = binEffectiveAmount[bin] * invW;
+                float localUp      = binEffectiveUp[bin] * invW;
+                float localDown    = binEffectiveDown[bin] * invW;
+                float localUpSm    = binUpSmoothNorm[bin] * invW;
+                float localDownSm  = binDownSmoothNorm[bin] * invW;
+                float localThresh  = binThreshOffsetDb[bin] * invW;
+                float localUpSel   = binEffectiveUpSel[bin] * invW;
+                float localDnSel   = binEffectiveDownSel[bin] * invW;
+                float localKnee    = binKneeAccum[bin] * invW;
 
                 binEffectiveAmount[bin] = globalAmountNorm * (1.0f - W) + localAmt * W;
                 binEffectiveUp[bin]     = globalUpMax * (1.0f - W) + localUp * W;
                 binEffectiveDown[bin]   = globalDownMax * (1.0f - W) + localDown * W;
-                binSmoothNorm[bin]      = globalSmoothNorm * (1.0f - W) + localSm * W;
+                binUpSmoothNorm[bin]    = globalUpSmoothNorm * (1.0f - W) + localUpSm * W;
+                binDownSmoothNorm[bin]  = globalDownSmoothNorm * (1.0f - W) + localDownSm * W;
                 binThreshOffsetDb[bin]  = localThresh * W;
                 binEffectiveUpSel[bin]  = globalUpSelNorm * (1.0f - W) + localUpSel * W;
                 binEffectiveDownSel[bin]= globalDownSelNorm * (1.0f - W) + localDnSel * W;
@@ -333,7 +357,8 @@ public:
                 binEffectiveUpSel[bin]  = globalUpSelNorm;
                 binEffectiveDownSel[bin]= globalDownSelNorm;
                 binThreshOffsetDb[bin]  = 0.0f;
-                binSmoothNorm[bin]      = globalSmoothNorm;
+                binUpSmoothNorm[bin]    = globalUpSmoothNorm;
+                binDownSmoothNorm[bin]  = globalDownSmoothNorm;
                 binKneeWidth[bin]       = globalKneeWidthDb;
 
                 if (globalAutoSpeed) {
@@ -354,7 +379,8 @@ public:
                 }
             }
             
-            binSmoothCoef[bin] = juce::jlimit(0.0f, 1.0f, binSmoothNorm[bin]);
+            binUpSmoothCoef[bin]   = juce::jlimit(0.0f, 1.0f, binUpSmoothNorm[bin]);
+            binDownSmoothCoef[bin] = juce::jlimit(0.0f, 1.0f, binDownSmoothNorm[bin]);
         }
     }
 
@@ -414,29 +440,34 @@ private:
         }
         smoothGlobalThresh += threshSmoothCoef * (rawGlobalThreshDb - smoothGlobalThresh);
 
-        const int numBins = currentFFTSize / 2;
+        const int numBins = currentFFTSize / 2 + 1;
+        const int halfSize = currentFFTSize / 2;
+        const int nyquistBin = halfSize;
         const float fftNorm = 2.0f / static_cast<float>(currentFFTSize);
         
-        std::vector<float> mainMagMax(numBins + 1, 0.0f);
-        std::vector<float> sidechainMagMax(numBins + 1, 0.0f);
+        std::fill(mainMagMax.begin(), mainMagMax.begin() + numBins, 0.0f);
+        std::fill(sidechainMagMax.begin(), sidechainMagMax.begin() + numBins, 0.0f);
         
         const bool useSidechain = (scChannels > 0);
         
-        // 1. ОБРАБАТЫВАЕМ SIDECHAIN (С ГАРАНТИРОВАННЫМ ZERO-PADDING ДО 2*N ДЛЯ JUCE)
+        // 1. ОБРАБАТЫВАЕМ SIDECHAIN
         if (useSidechain) {
             for (int ch = 0; ch < scChannels; ++ch) {
+                std::fill(fftWorkBuf[ch].begin(),
+                          fftWorkBuf[ch].begin() + 2 * currentFFTSize, 0.0f);
                 for (int k = 0; k < currentFFTSize; ++k) {
                     const int readIdx = (fifoIndex + k) % currentFFTSize;
                     fftWorkBuf[ch][k] = sidechainFifo[ch][readIdx] * windows[activeFFTIndex][k];
-                    fftWorkBuf[ch][k + currentFFTSize] = 0.0f;
                 }
-                fwdFFT[activeFFTIndex]->performRealOnlyForwardTransform(fftWorkBuf[ch].data());
+                fwdFFT[activeFFTIndex]->performRealOnlyForwardTransform(fftWorkBuf[ch].data(), false);
                 
                 for (int bin = 0; bin < numBins; ++bin) {
-                    float re = fftWorkBuf[ch][bin * 2];
-                    float im = fftWorkBuf[ch][bin * 2 + 1];
-                    float mag = (bin == 0) ? std::abs(re) : std::sqrt(re * re + im * im);
-                    mag *= fftNorm;
+                    const float re = fftWorkBuf[ch][2 * bin];
+                    const float im = fftWorkBuf[ch][2 * bin + 1];
+                    float scale = fftNorm;
+                    if (bin == 0 || bin == halfSize)
+                        scale *= 0.5f;
+                    float mag = std::sqrt(re * re + im * im) * scale;
                     sidechainMagMax[bin] = std::max(sidechainMagMax[bin], mag);
                 }
             }
@@ -444,18 +475,21 @@ private:
 
         // 2. ОБРАБАТЫВАЕМ MAIN INPUT
         for (int ch = 0; ch < numChannels; ++ch) {
+            std::fill(fftWorkBuf[ch].begin(),
+                      fftWorkBuf[ch].begin() + 2 * currentFFTSize, 0.0f);
             for (int k = 0; k < currentFFTSize; ++k) {
                 const int readIdx = (fifoIndex + k) % currentFFTSize;
                 fftWorkBuf[ch][k] = inputFifo[ch][readIdx] * windows[activeFFTIndex][k];
-                fftWorkBuf[ch][k + currentFFTSize] = 0.0f;
             }
-            fwdFFT[activeFFTIndex]->performRealOnlyForwardTransform(fftWorkBuf[ch].data());
+            fwdFFT[activeFFTIndex]->performRealOnlyForwardTransform(fftWorkBuf[ch].data(), false);
 
             for (int bin = 0; bin < numBins; ++bin) {
-                float re = fftWorkBuf[ch][bin * 2];
-                float im = fftWorkBuf[ch][bin * 2 + 1];
-                float mag = (bin == 0) ? std::abs(re) : std::sqrt(re * re + im * im);
-                mag *= fftNorm;
+                const float re = fftWorkBuf[ch][2 * bin];
+                const float im = fftWorkBuf[ch][2 * bin + 1];
+                float scale = fftNorm;
+                if (bin == 0 || bin == halfSize)
+                    scale *= 0.5f;
+                float mag = std::sqrt(re * re + im * im) * scale;
                 mainMagMax[bin] = std::max(mainMagMax[bin], mag);
             }
         }
@@ -535,15 +569,16 @@ private:
         }
 
         // =====================================================================
-        // 5. РАСЧЕТ ДЕЛЬТЫ С НЕПРЕРЫВНЫМ SOFT-KNEE (БЕЗ СКАЧКОВ И ЩЕЛЧКОВ)
+        // 5. РАЗДЕЛЬНЫЙ РАСЧЕТ UPWARD И DOWNWARD ДЕЛЬТЫ
         // =====================================================================
+        std::fill(rawUpDeltaDb.begin(), rawUpDeltaDb.begin() + numBins, 0.0f);
+        std::fill(rawDownDeltaDb.begin(), rawDownDeltaDb.begin() + numBins, 0.0f);
+
         for (int bin = 1; bin < numBins; ++bin) {
             const float envDb = envDbFast[bin];
             const float prominenceDb = envDb - spectralFloorDb[bin];
             const float targetLevelDb = binTargetDb[bin] + smoothGlobalThresh + binThreshOffsetDb[bin];
 
-            // deltaDb > 0: сигнал ВЫШЕ порога (Downward)
-            // deltaDb < 0: сигнал НИЖЕ порога (Upward)
             const float deltaDb = envDb - targetLevelDb;
 
             const float rawEnergyDb = envDb; 
@@ -552,13 +587,12 @@ private:
             const float amt = binEffectiveAmount[bin]; 
             const float depthMult = (amt <= 1.0f) ? amt : (1.0f + (amt - 1.0f) * 0.5f);
 
-            float variMuDelta = 0.0f;
-            const float kneeHalf = 2.5f; // Полуширина мягкого колена (5 dB зона перехода)
+            const float kneeHalf = 2.5f;
 
             if (deltaDb < 0.0f) { 
-                // ==================== UPWARD COMPRESSION ====================
+                // ==================== UPWARD PATH ====================
                 if (binEffectiveUp[bin] > 0.001f) {
-                    const float underThreshDb = -deltaDb; // > 0
+                    const float underThreshDb = -deltaDb;
                     const float upSel = binEffectiveUpSel[bin];
                     
                     float upWeight = 1.0f;
@@ -568,18 +602,16 @@ private:
                         upWeight = std::pow(1.0f - upSel, 2.0f) + upSel * valleyMask * 2.5f;
                     }
                     
-                    // Плавный вход от 0 dB
-                    variMuDelta = fast_tanh_sc(underThreshDb / 12.0f) 
-                                * binEffectiveUp[bin] * depthMult * noiseGate * upWeight;
+                    rawUpDeltaDb[bin] = fast_tanh_sc(underThreshDb / 12.0f) 
+                                     * binEffectiveUp[bin] * depthMult * noiseGate * upWeight;
                 }
             } 
             else { 
-                // ==================== DOWNWARD (SOOTHE MODE) ====================
+                // ==================== DOWNWARD PATH ====================
                 if (binEffectiveDown[bin] < -0.001f) {
-                    const float overThreshDb = deltaDb; // > 0
+                    const float overThreshDb = deltaDb;
                     const float downSel = binEffectiveDownSel[bin];
 
-                    // 1. Непрерывный квадратичный Soft-Knee вход (устраняет On/Off скачок)
                     float smoothExceedDb = 0.0f;
                     if (overThreshDb < kneeHalf * 2.0f) {
                         smoothExceedDb = (overThreshDb * overThreshDb) / (4.0f * kneeHalf);
@@ -590,74 +622,61 @@ private:
                     if (downSel > 0.001f) {
                         const float posProm = std::max(0.0f, prominenceDb - 1.2f);
                         
-                        // Множитель остроты пика будет активен только на тянущихся резонансах
                         const float localCrest = peakEnvBin[bin] / std::max(std::sqrt(rmsEnvBin[bin]), 1.0e-7f);
                         const float sustainWeight = 1.0f - juce::jlimit(0.0f, 1.0f, (localCrest - 1.5f) / 2.0f);
                         
                         const float resonanceMultiplier = 1.0f + std::min(4.0f, (posProm / 2.0f) * sustainWeight);
                         const float resonanceWeight = 1.0f - std::exp(-posProm * posProm / 10.0f);
                         
-                        // Пропуск широкого тела звука
                         const float broadFactor = std::pow(1.0f - downSel, 3.0f);
                         
-                        // ИСПРАВЛЕНИЕ: Множитель селективности теперь УМНОЖАЕТСЯ на плавное превышение порога
                         const float surgicalScale = broadFactor + downSel * resonanceWeight * resonanceMultiplier;
                         const float finalDriveDb = smoothExceedDb * surgicalScale;
                         
                         const float maxDownDb = -binEffectiveDown[bin] * depthMult;
-                        // Рациональная кривая: дает 0 dB на пороге и мягкий аналоговый рост
                         const float cutDb = maxDownDb * (finalDriveDb / (finalDriveDb + 10.0f));
                         
-                        variMuDelta = -cutDb * noiseGate;
+                        rawDownDeltaDb[bin] = -cutDb * noiseGate;
                     } 
                     else {
                         const float broadWeight = (downSel < -0.001f) 
                                                 ? (1.0f + downSel * std::min(1.0f, std::max(0.0f, prominenceDb) / 4.0f)) 
                                                 : 1.0f;
                         const float effExceed = smoothExceedDb * std::max(0.05f, broadWeight);
-                        variMuDelta = fast_tanh_sc(effExceed / 12.0f) 
-                                    * binEffectiveDown[bin] * depthMult * noiseGate;
+                        rawDownDeltaDb[bin] = fast_tanh_sc(effExceed / 12.0f) 
+                                           * binEffectiveDown[bin] * depthMult * noiseGate;
                     }
                 }
             }
-            rawDeltaDb[bin] = variMuDelta;
         }
 
         // =====================================================================
-        // АДАПТИВНЫЙ ЛОГАРИФМИЧЕСКИЙ ГАУССОВ КЕРНЕЛ (ANTI-FLANGER)
+        // 6. ANTI-FLANGER ГАУССОВ КЕРНЕЛ (Применяется ТОЛЬКО к Downward Cut)
         // =====================================================================
         std::fill(smoothedDelta.begin(), smoothedDelta.begin() + numBins, 0.0f);
 
         const float minNotchOctaves = 0.055f; 
         const float targetRadiusLn = minNotchOctaves * 0.693147f;
-        
         const int maxSpreadBins = currentFFTSize / 6; 
 
         for (int bin = 2; bin < numBins - 2; ++bin) {
-            float cut = rawDeltaDb[bin];
+            float cut = rawDownDeltaDb[bin];
             if (cut >= -0.05f) continue;
 
             const float centerLn = lnF[bin];
 
             int kLeft = 1;
-            while ((bin - kLeft) > 1 && (centerLn - lnF[bin - kLeft]) < targetRadiusLn * 1.5f && kLeft < maxSpreadBins) {
-                kLeft++;
-            }
-            
+            while ((bin - kLeft) > 1 && (centerLn - lnF[bin - kLeft]) < targetRadiusLn * 1.5f && kLeft < maxSpreadBins) kLeft++;
             int kRight = 1;
-            while ((bin + kRight) < (numBins - 1) && (lnF[bin + kRight] - centerLn) < targetRadiusLn * 1.5f && kRight < maxSpreadBins) {
-                kRight++;
-            }
+            while ((bin + kRight) < (numBins - 1) && (lnF[bin + kRight] - centerLn) < targetRadiusLn * 1.5f && kRight < maxSpreadBins) kRight++;
 
             for (int k = -kLeft; k <= kRight; ++k) {
                 int targetBin = bin + k;
                 float distOct = std::abs(centerLn - lnF[targetBin]) / 0.693147f;
                 float normDist = distOct / minNotchOctaves;
-                
                 float gWeight = std::exp(-0.5f * normDist * normDist);
 
                 float weightedCut = cut * gWeight;
-                
                 if (weightedCut < smoothedDelta[targetBin]) {
                     smoothedDelta[targetBin] = weightedCut;
                 }
@@ -666,46 +685,77 @@ private:
 
         for (int bin = 1; bin < numBins; ++bin) {
             if (smoothedDelta[bin] < -0.01f) {
-                rawDeltaDb[bin] = smoothedDelta[bin];
+                rawDownDeltaDb[bin] = smoothedDelta[bin];
             }
         }
 
-        // 7. ОКТАВНОЕ СГЛАЖИВАНИЕ ДЕЛЬТЫ
-        gainSmoothingPrefixDb[0] = 0.0f;
+        // =====================================================================
+        // 7. РАЗДЕЛЬНОЕ ПРЕФИКСНОЕ СГЛАЖИВАНИЕ ДЕЛЬТ
+        // =====================================================================
+        downSmoothingPrefixDb[0] = 0.0f;
+        upSmoothingPrefixDb[0]   = 0.0f;
         for (int bin = 0; bin < numBins; ++bin) {
-            gainSmoothingPrefixDb[bin + 1] = gainSmoothingPrefixDb[bin] + rawDeltaDb[bin];
+            downSmoothingPrefixDb[bin + 1] = downSmoothingPrefixDb[bin] + rawDownDeltaDb[bin];
+            upSmoothingPrefixDb[bin + 1]   = upSmoothingPrefixDb[bin]   + rawUpDeltaDb[bin];
         }
 
         const float maxRadiusLn = std::log(2.0f);
 
-        int leftIdx = 1;
-        int rightIdx = 1;
+        std::fill(finalDownDeltaBuf.begin(), finalDownDeltaBuf.begin() + numBins, 0.0f);
+        std::fill(finalUpDeltaBuf.begin(), finalUpDeltaBuf.begin() + numBins, 0.0f);
+
+        // Проход Downward Smoothing
+        int dLeft = 1, dRight = 1;
         for (int bin = 1; bin < numBins; ++bin) {
-            const float smoothAmount = binSmoothCoef[bin];
+            const float smoothAmount = binDownSmoothCoef[bin];
             const float radiusLn = smoothAmount * maxRadiusLn;
 
             if (radiusLn <= 1.0e-5f) {
-                smoothedDelta[bin] = rawDeltaDb[bin];
+                finalDownDeltaBuf[bin] = rawDownDeltaDb[bin];
                 continue;
             }
 
             const float centerLn = lnF[bin];
+            while (dLeft < bin && (centerLn - lnF[dLeft]) > radiusLn) dLeft++;
+            dRight = std::max(dRight, bin);
+            while (dRight + 1 < numBins && (lnF[dRight + 1] - centerLn) <= radiusLn) dRight++;
 
-            while (leftIdx < bin && (centerLn - lnF[leftIdx]) > radiusLn) {
-                leftIdx++;
-            }
-
-            rightIdx = std::max(rightIdx, bin);
-            while (rightIdx + 1 < numBins && (lnF[rightIdx + 1] - centerLn) <= radiusLn) {
-                rightIdx++;
-            }
-
-            const float sum = gainSmoothingPrefixDb[rightIdx + 1] - gainSmoothingPrefixDb[leftIdx];
-            const float count = static_cast<float>(rightIdx - leftIdx + 1);
+            const float sum = downSmoothingPrefixDb[dRight + 1] - downSmoothingPrefixDb[dLeft];
+            const float count = static_cast<float>(dRight - dLeft + 1);
             const float averaged = sum / count;
-            const float raw = rawDeltaDb[bin];
+            const float raw = rawDownDeltaDb[bin];
 
-            smoothedDelta[bin] = raw + (averaged - raw) * smoothAmount;
+            finalDownDeltaBuf[bin] = raw + (averaged - raw) * smoothAmount;
+        }
+
+        // Проход Upward Smoothing
+        int uLeft = 1, uRight = 1;
+        for (int bin = 1; bin < numBins; ++bin) {
+            const float smoothAmount = binUpSmoothCoef[bin];
+            const float radiusLn = smoothAmount * maxRadiusLn;
+
+            if (radiusLn <= 1.0e-5f) {
+                finalUpDeltaBuf[bin] = rawUpDeltaDb[bin];
+                continue;
+            }
+
+            const float centerLn = lnF[bin];
+            while (uLeft < bin && (centerLn - lnF[uLeft]) > radiusLn) uLeft++;
+            uRight = std::max(uRight, bin);
+            while (uRight + 1 < numBins && (lnF[uRight + 1] - centerLn) <= radiusLn) uRight++;
+
+            const float sum = upSmoothingPrefixDb[uRight + 1] - upSmoothingPrefixDb[uLeft];
+            const float count = static_cast<float>(uRight - uLeft + 1);
+            const float averaged = sum / count;
+            const float raw = rawUpDeltaDb[bin];
+
+            finalUpDeltaBuf[bin] = raw + (averaged - raw) * smoothAmount;
+        }
+
+        // Объединение сглаженных дельт
+        for (int bin = 1; bin < numBins; ++bin) {
+            smoothedDelta[bin] = finalDownDeltaBuf[bin] + finalUpDeltaBuf[bin];
+            rawDeltaDb[bin]    = smoothedDelta[bin];
         }
 
         // 8. ЧАСТОТНО-ЗАВИСИМОЕ ВРЕМЕННОЕ СГЛАЖИВАНИЕ (Анти-Флаттер / Phase Guard)
@@ -727,14 +777,27 @@ private:
         }
 
         for (int ch = 0; ch < numChannels; ++ch) {
-            for (int bin = 1; bin < numBins; ++bin) {
-                fftWorkBuf[ch][bin * 2]     *= bandGainsBin[bin];
-                fftWorkBuf[ch][bin * 2 + 1] *= bandGainsBin[bin];
+            for (int bin = 1; bin < halfSize; ++bin) {
+                const float gain = bandGainsBin[bin];
+
+                const int positiveIndex = 2 * bin;
+                fftWorkBuf[ch][positiveIndex]     *= gain;
+                fftWorkBuf[ch][positiveIndex + 1] *= gain;
+
+                const int mirrorBin = currentFFTSize - bin;
+                const int mirrorIndex = 2 * mirrorBin;
+                fftWorkBuf[ch][mirrorIndex]     *= gain;
+                fftWorkBuf[ch][mirrorIndex + 1] *= gain;
             }
+            // Nyquist находится в комплексном бине N/2 (индексы N и N+1)
+            const int nyquistIndex = 2 * halfSize;
+            const float nyquistGain = bandGainsBin[nyquistBin];
+            fftWorkBuf[ch][nyquistIndex]     *= nyquistGain;
+            fftWorkBuf[ch][nyquistIndex + 1] *= nyquistGain;
             
             if (ch == 0 && vizDeltaL != nullptr) {
                 for (int bin = 1; bin < numBins; ++bin) {
-                    const float gainDb = juce::Decibels::gainToDecibels(bandGainsBin[bin]);
+                    const float gainDb = juce::Decibels::gainToDecibels(juce::jmax(1.0e-8f, bandGainsBin[bin]));
                     const float oldDelta = vizDeltaL[bin].load(std::memory_order_relaxed);
                     vizDeltaL[bin].store(oldDelta * 0.85f + gainDb * 0.15f, std::memory_order_relaxed);
                 }
@@ -752,8 +815,7 @@ private:
     {
         if (!targetDirty.exchange(false, std::memory_order_acquire)) return;
 
-        const int numBins = currentFFTSize / 2;
-
+        const int numBins = currentFFTSize / 2 + 1;
         FastBiquadParams filters[8];
         int activeCount = 0;
 
@@ -786,7 +848,7 @@ private:
     double sr = 44100.0;
 
     int currentFFTSize = 512;
-    int currentFFTOrder = 9;
+    int currentFFTOrder = 8;
     int currentHopSize = 128;
 
     std::unique_ptr<juce::dsp::FFT> fwdFFT[3];
@@ -811,16 +873,21 @@ private:
     std::vector<double> cosW[3];
     std::vector<double> cos2W[3];
     std::vector<float> lnFreqs[3];
-    std::vector<float> gainSmoothingPrefixDb;
     std::vector<float> peakEnvBin, rmsEnvBin, bandGainsBin, rawDeltaDb, binTargetDb;
-    std::vector<float> binPAtk, binPRel, binRAtk, binRRel, binEnvSpeed, binSmoothCoef;
+    std::vector<float> binPAtk, binPRel, binRAtk, binRRel, binEnvSpeed, binUpSmoothCoef, binDownSmoothCoef;
     std::vector<float> binEffectiveAmount, binEffectiveUp, binEffectiveDown;
     std::vector<float> binEffectiveUpSel, binEffectiveDownSel, binThreshOffsetDb, spectralFloorDb;
     std::vector<float> binKneeWidth;
     std::vector<float> binAttackCoef, binReleaseCoef;
 
-    std::vector<float> envDbFast, smoothedDelta, binWeightSum, binSpeedNorm, binSmoothNorm;
+    std::vector<float> envDbFast, smoothedDelta, binWeightSum, binSpeedNorm;
+    std::vector<float> binUpSmoothNorm, binDownSmoothNorm;
     std::vector<float> envPrefixDb;
+    std::vector<float> rawUpDeltaDb, rawDownDeltaDb;
+    std::vector<float> upSmoothingPrefixDb, downSmoothingPrefixDb;
+    std::vector<float> mainMagMax, sidechainMagMax;
+    std::vector<float> finalDownDeltaBuf, finalUpDeltaBuf;
+    std::vector<float> binAttackMsAccum, binReleaseMsAccum, binKneeAccum, binAutoSpeedAccum;
 
     float smoothGlobalThresh = 0.0f;
     bool smoothedParamsInitialised = false;

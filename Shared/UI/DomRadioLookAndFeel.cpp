@@ -67,98 +67,119 @@ void DomRadioLookAndFeel::drawLabel(juce::Graphics& g, juce::Label& label)
 
 void DomRadioLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
                                            float sliderPosProportional, float rotaryStartAngle,
-                                           float rotaryEndAngle, juce::Slider&)
+                                           float rotaryEndAngle, juce::Slider& slider)
 {
-    const float radius = static_cast<float>(juce::jmin(width / 2, height / 2)) - 3.0f;
-    const float centreX = static_cast<float>(x) + static_cast<float>(width) * 0.5f;
-    const float centreY = static_cast<float>(y) + static_cast<float>(height) * 0.5f;
+    // 1. Честно вычитаем область текстового поля снизу, чтобы круг центрировался строго в верхней части
+    const int textBoxH = slider.getTextBoxHeight();
+    const float availableH = (slider.getTextBoxPosition() == juce::Slider::TextBoxBelow) 
+                             ? (float)(height - textBoxH) 
+                             : (float)height;
+
+    const float diameter = juce::jmin((float)width, availableH) - 4.0f;
+    const float radius = diameter * 0.5f;
+    const float centreX = (float)x + (float)width * 0.5f;
+    const float centreY = (float)y + availableH * 0.5f;
     const float rx = centreX - radius;
     const float ry = centreY - radius;
     const float rw = radius * 2.0f;
     const float angle = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
 
-    const bool isLargeKnob = (width >= 60 || height >= 60);
+    // Большие ручки (IN GAIN, TAPE SPEED) имеют диаметр > 50px
+    const bool isLargeKnob = (diameter >= 48.0f);
 
-    g.setColour(juce::Colours::black.withAlpha(0.38f));
-    g.fillEllipse(rx + 2.0f, ry + 4.0f, rw, rw);
+    // Мягкая тень под ручкой
+    g.setColour(juce::Colours::black.withAlpha(0.40f));
+    g.fillEllipse(rx + 1.5f, ry + 3.0f, rw, rw);
 
     if (isLargeKnob)
     {
-        juce::ColourGradient metalGrad(juce::Colour::fromRGB(220, 215, 205), centreX - radius * 0.7f, centreY - radius * 0.7f,
-                                       juce::Colour::fromRGB(70, 68, 62), centreX + radius * 0.7f, centreY + radius * 0.7f, true);
+        // === БОЛЬШАЯ РУЧКА: АНОДИРОВАННЫЙ АЛЮМИНИЙ С РЕБРАМИ ===
+        juce::ColourGradient metalGrad(juce::Colour::fromRGB(225, 220, 210), centreX - radius * 0.7f, centreY - radius * 0.7f,
+                                       juce::Colour::fromRGB(65, 62, 55), centreX + radius * 0.7f, centreY + radius * 0.7f, true);
         metalGrad.addColour(0.3, juce::Colour::fromRGB(180, 175, 165));
-        metalGrad.addColour(0.7, juce::Colour::fromRGB(110, 105, 95));
+        metalGrad.addColour(0.7, juce::Colour::fromRGB(105, 100, 90));
         g.setGradientFill(metalGrad);
         g.fillEllipse(rx, ry, rw, rw);
 
+        // Насечки (36 зубьев)
         const int numTeeth = 36;
         for (int i = 0; i < numTeeth; ++i) {
             float a = (juce::MathConstants<float>::twoPi / (float)numTeeth) * i;
             float cosA = std::cos(a), sinA = std::sin(a);
             bool isHighlight = (sinA < 0.0f);
-            g.setColour(isHighlight ? juce::Colour::fromRGB(230, 225, 215) : juce::Colour::fromRGB(50, 48, 42));
+            g.setColour(isHighlight ? juce::Colour::fromRGB(235, 230, 220) : juce::Colour::fromRGB(45, 42, 38));
             g.drawLine(centreX + cosA * (radius - 3.5f), centreY + sinA * (radius - 3.5f),
                        centreX + cosA * radius, centreY + sinA * radius, 1.4f);
         }
 
-        const float innerR = radius - 4.0f;
-        juce::ColourGradient innerGrad(juce::Colour::fromRGB(205, 200, 190), centreX, centreY - innerR,
-                                       juce::Colour::fromRGB(95, 90, 82), centreX, centreY + innerR, false);
+        // Внутренняя крышка
+        const float innerR = radius - 5.0f;
+        juce::ColourGradient innerGrad(juce::Colour::fromRGB(210, 205, 195), centreX, centreY - innerR,
+                                       juce::Colour::fromRGB(90, 85, 78), centreX, centreY + innerR, false);
         g.setGradientFill(innerGrad);
         g.fillEllipse(centreX - innerR, centreY - innerR, innerR * 2.0f, innerR * 2.0f);
 
-        g.setColour(juce::Colour::fromRGB(50, 48, 42).withAlpha(0.25f));
-        g.drawEllipse(centreX - innerR * 0.75f, centreY - innerR * 0.75f, innerR * 1.5f, innerR * 1.5f, 0.8f);
-
+        // Блик
         juce::Path specArc;
         specArc.addArc(centreX - innerR + 1.0f, centreY - innerR + 1.0f, innerR * 2.0f - 2.0f, innerR * 2.0f - 2.0f, -1.0f, 0.6f, true);
-        juce::ColourGradient specGrad(juce::Colours::white.withAlpha(0.40f), centreX, centreY - innerR,
+        juce::ColourGradient specGrad(juce::Colours::white.withAlpha(0.45f), centreX, centreY - innerR,
                                       juce::Colours::white.withAlpha(0.0f), centreX, centreY, false);
         g.setGradientFill(specGrad);
         g.fillPath(specArc);
 
+        // Оранжевый указатель
         juce::Path pointer;
         const float pointerLength = innerR * 0.85f;
-        const float pointerThickness = 2.5f;
+        const float pointerThickness = 2.8f;
         pointer.addRoundedRectangle(-pointerThickness * 0.5f, -innerR + 2.0f, pointerThickness, pointerLength, 1.0f);
+        pointer.applyTransform(juce::AffineTransform::rotation(angle).translated(centreX, centreY));
+
+        g.setColour(juce::Colours::black.withAlpha(0.5f));
+        g.strokePath(pointer, juce::PathStrokeType(1.2f));
+
+        g.setColour(juce::Colour::fromRGB(240, 130, 25));
+        g.fillPath(pointer);
+    }
+    else
+    {
+        // === МАЛАЯ РУЧКА: БАКЕЛИТ + МЕТАЛЛИЧЕСКИЙ ВИНТАЖНЫЙ КОЛПАК ===
+        juce::ColourGradient baseGradient(juce::Colour::fromRGB(70, 68, 62), centreX, ry,
+                                          juce::Colour::fromRGB(20, 18, 16), centreX, ry + rw, false);
+        g.setGradientFill(baseGradient);
+        g.fillEllipse(rx, ry, rw, rw);
+
+        // Рифление (20 зубьев)
+        const int numTeeth = 20;
+        for (int i = 0; i < numTeeth; ++i) {
+            float a = (juce::MathConstants<float>::twoPi / (float)numTeeth) * i;
+            float cosA = std::cos(a), sinA = std::sin(a);
+            bool isHighlight = (sinA < 0.0f);
+            g.setColour(isHighlight ? juce::Colour::fromRGB(95, 90, 80) : juce::Colour::fromRGB(15, 14, 12));
+            g.drawLine(centreX + cosA * (radius - 2.5f), centreY + sinA * (radius - 2.5f),
+                       centreX + cosA * radius, centreY + sinA * radius, 1.3f);
+        }
+
+        // Центральный купол (увеличили радиус до 72% вместо 58%, чтобы ручка выглядела полновесно)
+        const float innerRadius = radius * 0.72f;
+        juce::ColourGradient domeGradient(juce::Colour::fromRGB(215, 210, 198), centreX - innerRadius * 0.5f, centreY - innerRadius * 0.5f,
+                                          juce::Colour::fromRGB(75, 70, 62), centreX + innerRadius, centreY + innerRadius, true);
+        g.setGradientFill(domeGradient);
+        g.fillEllipse(centreX - innerRadius, centreY - innerRadius, innerRadius * 2.0f, innerRadius * 2.0f);
+
+        g.setColour(juce::Colour::fromRGB(45, 40, 35).withAlpha(0.4f));
+        g.drawEllipse(centreX - innerRadius, centreY - innerRadius, innerRadius * 2.0f, innerRadius * 2.0f, 0.8f);
+
+        // Оранжевый указатель-риска
+        juce::Path pointer;
+        const float pointerLength = radius * 0.88f;
+        const float pointerThickness = 2.2f;
+        pointer.addRoundedRectangle(-pointerThickness * 0.5f, -radius + 2.0f, pointerThickness, pointerLength, 1.0f);
         pointer.applyTransform(juce::AffineTransform::rotation(angle).translated(centreX, centreY));
 
         g.setColour(juce::Colours::black.withAlpha(0.4f));
         g.strokePath(pointer, juce::PathStrokeType(1.0f));
 
-        g.setColour(juce::Colour::fromRGB(230, 120, 20));
-        g.fillPath(pointer);
-    }
-    else
-    {
-        juce::ColourGradient baseGradient(juce::Colour::fromRGB(65, 65, 65), centreX, ry,
-                                          juce::Colour::fromRGB(15, 15, 15), centreX, ry + rw, false);
-        g.setGradientFill(baseGradient);
-        g.fillEllipse(rx, ry, rw, rw);
-
-        const int numTeeth = 24;
-        for (int i = 0; i < numTeeth; ++i) {
-            float a = (juce::MathConstants<float>::twoPi / (float)numTeeth) * i;
-            float cosA = std::cos(a), sinA = std::sin(a);
-            bool isHighlight = (sinA < 0.0f);
-            g.setColour(isHighlight ? juce::Colour::fromRGB(85, 85, 85) : juce::Colour::fromRGB(10, 10, 10));
-            g.drawLine(centreX + cosA * (radius - 2.5f), centreY + sinA * (radius - 2.5f),
-                       centreX + cosA * radius, centreY + sinA * radius, 1.2f);
-        }
-
-        const float innerRadius = radius * 0.58f;
-        juce::ColourGradient domeGradient(juce::Colour::fromRGB(210, 205, 190), centreX - innerRadius, centreY - innerRadius,
-                                          juce::Colour::fromRGB(80, 75, 65), centreX + innerRadius, centreY + innerRadius, true);
-        g.setGradientFill(domeGradient);
-        g.fillEllipse(centreX - innerRadius, centreY - innerRadius, innerRadius * 2.0f, innerRadius * 2.0f);
-
-        juce::Path pointer;
-        const float pointerLength = radius * 0.82f;
-        const float pointerThickness = 2.2f;
-        pointer.addRoundedRectangle(-pointerThickness * 0.5f, -radius + 3.0f, pointerThickness, pointerLength, 1.0f);
-        pointer.applyTransform(juce::AffineTransform::rotation(angle).translated(centreX, centreY));
-
-        g.setColour(juce::Colour::fromRGB(225, 125, 25));
+        g.setColour(juce::Colour::fromRGB(240, 130, 25));
         g.fillPath(pointer);
     }
 }

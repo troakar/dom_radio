@@ -5,17 +5,23 @@ class LabeledKnob : public juce::Component
 {
 public:
     LabeledKnob(juce::AudioProcessorValueTreeState& apvts,
-                const juce::String& paramID, const juce::String& labelText)
+                const juce::String& paramID, 
+                const juce::String& labelText,
+                bool isLarge = false)
+        : isLargeKnob(isLarge)
     {
         slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 18);
+        // Компактный текстовый бокс (высота 14px вместо 18px, ширина на весь компонент)
+        slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 85, 14);
         slider.setPopupDisplayEnabled(true, true, nullptr);
+        slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        slider.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
         addAndMakeVisible(slider);
         
         label.setText(labelText, juce::dontSendNotification);
         label.setJustificationType(juce::Justification::centred);
-        label.setFont(juce::Font(12.0f, juce::Font::bold));
-        label.setColour(juce::Label::textColourId, juce::Colour::fromRGB(180, 175, 160));
+        label.setFont(juce::FontOptions(isLarge ? 11.0f : 9.5f, juce::Font::bold));
+        label.setColour(juce::Label::textColourId, juce::Colour::fromRGB(185, 180, 165));
         label.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
         addAndMakeVisible(label);
 
@@ -26,14 +32,16 @@ public:
     void resized() override
     {
         auto bounds = getLocalBounds();
-        label.setBounds(bounds.removeFromTop(18));
-        bounds.removeFromTop(5);
+        const int labelH = isLargeKnob ? 16 : 13;
+        label.setBounds(bounds.removeFromTop(labelH));
+        // Отдаем ВСЕ оставшееся место слайдеру
         slider.setBounds(bounds);
     }
 
     juce::Slider slider;
 
 private:
+    bool isLargeKnob = false;
     juce::Label label;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
 };

@@ -26,7 +26,8 @@ private:
     std::unique_ptr<GradientFilterOverlay> gradientOverlay;
 
     std::unique_ptr<GradientKnob> inGainKnob, outLvlKnob, mixKnob;
-    std::unique_ptr<GradientKnob> amountKnob, upRangeKnob, downRangeKnob, speedKnob, smoothKnob;
+    std::unique_ptr<GradientKnob> amountKnob, upRangeKnob, downRangeKnob, speedKnob;
+    std::unique_ptr<GradientKnob> upSmoothKnob, downSmoothKnob;
     std::unique_ptr<GradientKnob> upSelKnob, downSelKnob;
 
     juce::TextButton deltaButton;

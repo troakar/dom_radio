@@ -26,7 +26,8 @@ struct GradientPoint
     float releaseMs = 150.0f;        // Используется если useAutoSpeed = false
     float kneeWidthDb = 3.0f;        // Ширина колена компрессора
     
-    float smoothPct = 20.0f;
+    float upSmoothPct = 50.0f;
+    float downSmoothPct = 15.0f;
     float upSelectivity = 0.0f;
     float downSelectivity = 0.0f;
 };

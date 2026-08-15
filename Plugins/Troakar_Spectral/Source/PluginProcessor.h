@@ -37,6 +37,9 @@ public:
     int getCurrentFFTSize() const noexcept { return visualFFTSize.load(std::memory_order_acquire); }
     bool isEngineSettled() const { return spectralEngine.isEnvelopeSettled(); }
 
+    int getFFTModeIndex() const noexcept;
+    int getViewRangeIndex() const noexcept;
+
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
@@ -63,7 +66,8 @@ public:
     float prevDownMax = -999.0f;
     float prevAmount = -999.0f;
     float prevSpeed = -999.0f;
-    float prevSmooth = -999.0f;
+    float prevUpSmooth = -999.0f;
+    float prevDownSmooth = -999.0f;
     float prevUpSel = -999.0f;
     float prevDownSel = -999.0f;
 
@@ -98,7 +102,8 @@ private:
     std::atomic<float>* pUpRange = nullptr;
     std::atomic<float>* pDownRange = nullptr;
     std::atomic<float>* pSpeed = nullptr;
-    std::atomic<float>* pSmooth = nullptr;
+    std::atomic<float>* pUpSmooth = nullptr;
+    std::atomic<float>* pDownSmooth = nullptr;
     std::atomic<float>* pUpSel = nullptr;
     std::atomic<float>* pDownSel = nullptr;
     std::atomic<float>* pFftMode = nullptr;
@@ -113,7 +118,8 @@ private:
     std::atomic<float>* pGradUpMax[4];
     std::atomic<float>* pGradDownMax[4];
     std::atomic<float>* pGradSpeed[4];
-    std::atomic<float>* pGradSmooth[4];
+    std::atomic<float>* pGradUpSmooth[4];
+    std::atomic<float>* pGradDownSmooth[4];
     std::atomic<float>* pGradUpSel[4];
     std::atomic<float>* pGradDownSel[4];
     std::atomic<float>* pGradAutoSpeed[4];

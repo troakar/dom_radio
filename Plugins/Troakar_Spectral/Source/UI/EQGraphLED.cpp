@@ -36,8 +36,8 @@ EQGraphLED::EQGraphLED(TroakarSpectralAudioProcessor& p)
         processor.apvts.addParameterListener(prefix + "_CENTER_GAIN", paramListener.get());
         processor.apvts.addParameterListener(prefix + "_BANDWIDTH", paramListener.get());
     }
-    lastFFTMode = static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
-    updateViewRange(static_cast<int>(*processor.apvts.getRawParameterValue("VIEW_RANGE")));
+    lastFFTMode = processor.getFFTModeIndex();
+    updateViewRange(processor.getViewRangeIndex());
 }
 
 EQGraphLED::~EQGraphLED()
@@ -428,9 +428,9 @@ float EQGraphLED::getTargetCurveDb(double freq) const
 
 float EQGraphLED::getInterpolatedArray(const std::atomic<float>* arr, double freq, double sr) const
 {
-    const int fftMode = static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
-    const int fftSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
-    const int maxBin = (fftSize / 2) - 2;
+    const int fftSize = processor.getCurrentFFTSize();
+    const int numBins = fftSize / 2 + 1;
+    const int maxBin = numBins - 2;
 
     float fBin = static_cast<float>(freq * static_cast<double>(fftSize) / sr);
     if (fBin < 1.0f) return arr[1].load(std::memory_order_relaxed);
@@ -472,10 +472,9 @@ void EQGraphLED::drawSpectrumFog(juce::Graphics& g, const juce::Rectangle<float>
     const int w = getWidth();
     if (w <= 0) return;
 
-    const int fftMode = static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
-    const int fftSize = (fftMode == 0) ? 512 : (fftMode == 1) ? 1024 : 2048;
+    const int fftSize = processor.getCurrentFFTSize();
     const double sr = juce::jmax(44100.0, processor.getSampleRate());
-    const int numBins = fftSize / 2;
+    const int numBins = fftSize / 2 + 1;
     const double binWidthHz = sr / static_cast<double>(fftSize);
     const double nyquistHz = sr * 0.5;
 
@@ -505,31 +504,42 @@ void EQGraphLED::drawSpectrumFog(juce::Graphics& g, const juce::Rectangle<float>
         // Перцептуальная компенсация — ТА ЖЕ, что и в детекторе
         const float perceptualTiltDb = 3.0f * std::log2(std::max(20.0f, static_cast<float>(centerFreq)) / 1000.0f);
 
-        // Если в пиксель помещается несколько бинов — берём максимум
+        // Если в пиксель помещается несколько бинов — логарифмический пик-пуллинг
         if ((freqRight - freqLeft) > binWidthHz) {
             int firstBin = juce::jlimit(1, numBins - 1, static_cast<int>(std::floor(freqLeft / binWidthHz)));
             int lastBin  = juce::jlimit(1, numBins - 1, static_cast<int>(std::ceil(freqRight / binWidthHz)));
 
-            float maxMain = -100.0f;
-            float maxSc   = -100.0f;
+            const double logFreqLeft   = std::log10(juce::jmax(freqLeft, 20.0));
+            const double logFreqRight  = std::log10(juce::jmax(freqRight, 20.0));
+            const double logFreqCenter = std::log10(centerFreq);
+            const double logHalfBw     = (logFreqRight - logFreqLeft) * 0.5;
+            const double weightSigma   = logHalfBw * 0.25;
+
+            float maxMainMagnitude = 0.0f;
+            float maxScMagnitude   = 0.0f;
 
             for (int b = firstBin; b <= lastBin; ++b) {
+                const double binFreq = b * binWidthHz;
+                const double logBinFreq = std::log10(juce::jmax(binFreq, 20.0));
+                const double distFromCenter = std::abs(logBinFreq - logFreqCenter);
+                const double weight = (weightSigma > 0.0)
+                    ? std::exp(-0.5 * distFromCenter * distFromCenter / (weightSigma * weightSigma))
+                    : 1.0;
+
                 float rawMag = processor.spectrumDataLeft[b].load(std::memory_order_relaxed);
-                if (rawMag > 1.0e-7f) {
-                    float db = juce::Decibels::gainToDecibels(rawMag) + perceptualTiltDb;
-                    maxMain = std::max(maxMain, db);
-                }
+                maxMainMagnitude = std::max(maxMainMagnitude, rawMag * (float)weight);
                 if (hasSidechainSignal) {
                     float scMag = processor.sidechainData[b].load(std::memory_order_relaxed);
-                    if (scMag > 1.0e-7f) {
-                        float scDb = juce::Decibels::gainToDecibels(scMag) + perceptualTiltDb;
-                        maxSc = std::max(maxSc, scDb);
-                    }
+                    maxScMagnitude = std::max(maxScMagnitude, scMag * (float)weight);
                 }
             }
 
-            mainCurveDb[x] = maxMain;
-            if (hasSidechainSignal) scCurveDb[x] = maxSc;
+            mainCurveDb[x] = (maxMainMagnitude > 1.0e-7f)
+                ? juce::Decibels::gainToDecibels(maxMainMagnitude) + perceptualTiltDb
+                : -100.0f;
+            if (hasSidechainSignal) scCurveDb[x] = (maxScMagnitude > 1.0e-7f)
+                ? juce::Decibels::gainToDecibels(maxScMagnitude) + perceptualTiltDb
+                : -100.0f;
         } else {
             // Если бины шире пикселя (зона НЧ) — линейная интерполяция
             const double binPos = juce::jmax(1.0, centerFreq / binWidthHz);
@@ -760,8 +770,7 @@ void EQGraphLED::paint(juce::Graphics& g)
         }
     }
 
-    // 2. ВОССТАНОВЛЕНИЕ: Отрисовка узлов обычного эквалайзера (1-8)
-    float globalThreshPaint = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
+    // 2. ВОССТАНОВЛЕНИЕ: Отрисовка узлов обычного эквалайзера (1-8) - ПРЯМО НА КРИВОЙ
     for (int i = 0; i < 8; ++i)
     {
         juce::String prefix = "BAND_" + juce::String(i);
@@ -770,10 +779,10 @@ void EQGraphLED::paint(juce::Graphics& g)
         if (!enabled && draggingNode != i) continue;
 
         float freq = *processor.apvts.getRawParameterValue(prefix + "_FREQ");
-        float gain = *processor.apvts.getRawParameterValue(prefix + "_GAIN");
-        float q = *processor.apvts.getRawParameterValue(prefix + "_Q");
+        float q    = *processor.apvts.getRawParameterValue(prefix + "_Q");
 
-        juce::Point<float> pos { freqToX(freq), gainToY(gain + globalThreshPaint) };
+        float nodeTotalDb = getTotalTargetDbAtFreq(freq);
+        juce::Point<float> pos { freqToX(freq), gainToY(nodeTotalDb) };
 
         float intensity = (draggingNode == i) ? 1.0f : (hoveredNode == i ? 0.85f : 0.5f);
         juce::Colour nodeColor = enabled ? phosphor : juce::Colours::grey;
@@ -794,12 +803,13 @@ void EQGraphLED::paint(juce::Graphics& g)
         g.drawText(juce::String(i + 1), (int)pos.x - 5, (int)pos.y - 5, 10, 10, juce::Justification::centred);
     }
 
-    // 3. Отрисовка маркеров градиентов (G0, G1...) поверх всего остального
+    // 3. Отрисовка маркеров градиентов (G0, G1...) поверх всего остального - ПРЯМО НА КРИВОЙ
     for (const auto& gp : processor.gradientManager.points)
     {
         if (!gp.active) continue;
         
-        juce::Point<float> center { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb + globalThreshPaint) };
+        float gradTotalDb = getTotalTargetDbAtFreq(gp.centerFreqHz);
+        juce::Point<float> center { freqToX(gp.centerFreqHz), gainToY(gradTotalDb) };
         float intensity = gp.isSelected ? 1.0f : (hoveredGradientId == gp.id ? 0.8f : 0.4f);
 
         g.setColour(gp.color.withAlpha(gp.isSelected ? 0.8f : 0.3f));
@@ -824,8 +834,8 @@ void EQGraphLED::paint(juce::Graphics& g)
         int id = draggingGradientId >= 0 ? draggingGradientId : hoveredGradientId;
         if (auto* gp = processor.gradientManager.getPoint(id)) {
             tooltipFreq = gp->centerFreqHz;
-            tooltipGain = gp->centerGainDb;
-            tooltipPos = { freqToX(tooltipFreq), gainToY(tooltipGain + globalThreshPaint) };
+            tooltipGain = getTotalTargetDbAtFreq(gp->centerFreqHz);
+            tooltipPos = { freqToX(tooltipFreq), gainToY(tooltipGain) };
             tooltipColor = gp->color;
             showTooltip = true;
         }
@@ -834,8 +844,8 @@ void EQGraphLED::paint(juce::Graphics& g)
         int id = draggingNode >= 0 ? draggingNode : hoveredNode;
         juce::String prefix = "BAND_" + juce::String(id);
         tooltipFreq = *processor.apvts.getRawParameterValue(prefix + "_FREQ");
-        tooltipGain = *processor.apvts.getRawParameterValue(prefix + "_GAIN");
-        tooltipPos = { freqToX(tooltipFreq), gainToY(tooltipGain + globalThreshPaint) };
+        tooltipGain = getTotalTargetDbAtFreq(tooltipFreq);
+        tooltipPos = { freqToX(tooltipFreq), gainToY(tooltipGain) };
         tooltipColor = phosphor;
         showTooltip = true;
     }
@@ -902,9 +912,10 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
     bool clickedGradient = false;
     for (const auto& gp : gradientManager.points)
     {
+        float gradTotalDb = getTotalTargetDbAtFreq(gp.centerFreqHz);
         juce::Point<float> gpPos { 
             freqToX(gp.centerFreqHz), 
-            gainToY(gp.centerGainDb + globalThresh) 
+            gainToY(gradTotalDb) 
         };
 
         if (e.position.getDistanceFrom(gpPos) < 20.0f)
@@ -938,7 +949,8 @@ void EQGraphLED::mouseDown(const juce::MouseEvent& e)
         const float gain = 
             *processor.apvts.getRawParameterValue(prefix + "_GAIN");
 
-        const juce::Point<float> pos { freqToX(freq), gainToY(gain + globalThresh) };
+        float nodeTotalDb = getTotalTargetDbAtFreq(freq);
+        const juce::Point<float> pos { freqToX(freq), gainToY(nodeTotalDb) };
 
         if (e.position.getDistanceFrom(pos) < 15.0f)
         {
@@ -984,10 +996,9 @@ void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
 
         const float freq = 
             *apvts.getRawParameterValue(prefix + "_FREQ");
-        const float gain = 
-            *apvts.getRawParameterValue(prefix + "_GAIN");
 
-        const juce::Point<float> pos { freqToX(freq), gainToY(gain + globalThresh) };
+        float nodeTotalDb = getTotalTargetDbAtFreq(freq);
+        const juce::Point<float> pos { freqToX(freq), gainToY(nodeTotalDb) };
 
         if (e.position.getDistanceFrom(pos) < 15.0f)
         {
@@ -1001,9 +1012,10 @@ void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
 
     for (const auto& gp : gradientManager.points)
     {
+        float gradTotalDb = getTotalTargetDbAtFreq(gp.centerFreqHz);
         const juce::Point<float> gpPos { 
             freqToX(gp.centerFreqHz), 
-            gainToY(gp.centerGainDb + globalThresh) 
+            gainToY(gradTotalDb) 
         };
 
         if (e.position.getDistanceFrom(gpPos) < 15.0f)
@@ -1029,7 +1041,6 @@ void EQGraphLED::mouseDoubleClick(const juce::MouseEvent& e)
 
 void EQGraphLED::mouseMove(const juce::MouseEvent& e)
 {
-    float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
     int lastHovered = hoveredNode;
     hoveredNode = -1;
     hoveredGradientId = -1;
@@ -1038,7 +1049,8 @@ void EQGraphLED::mouseMove(const juce::MouseEvent& e)
 
     for (const auto& gp : gradientManager.points)
     {
-        juce::Point<float> gpPos { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb + globalThresh) };
+        float gradTotalDb = getTotalTargetDbAtFreq(gp.centerFreqHz);
+        juce::Point<float> gpPos { freqToX(gp.centerFreqHz), gainToY(gradTotalDb) };
         if (e.position.getDistanceFrom(gpPos) < 15.0f)
         {
             hoveredGradientId = gp.id;
@@ -1056,9 +1068,8 @@ void EQGraphLED::mouseMove(const juce::MouseEvent& e)
             if (!enabled) continue;
 
             float freq = *processor.apvts.getRawParameterValue(prefix + "_FREQ");
-            float gain = *processor.apvts.getRawParameterValue(prefix + "_GAIN");
-
-            juce::Point<float> pos { freqToX(freq), gainToY(gain + globalThresh) };
+            float nodeTotalDb = getTotalTargetDbAtFreq(freq);
+            juce::Point<float> pos { freqToX(freq), gainToY(nodeTotalDb) };
             float dist = e.position.getDistanceFrom(pos);
 
             if (dist < 15.0f)
@@ -1130,11 +1141,10 @@ void EQGraphLED::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWhee
         return;
     }
 
-    float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
-
     for (auto& gp : gradientManager.points)
     {
-        juce::Point<float> gpPos { freqToX(gp.centerFreqHz), gainToY(gp.centerGainDb + globalThresh) };
+        float gradTotalDb = getTotalTargetDbAtFreq(gp.centerFreqHz);
+        juce::Point<float> gpPos { freqToX(gp.centerFreqHz), gainToY(gradTotalDb) };
         
         bool hoverDot = e.position.getDistanceFrom(gpPos) < 25.0f;
         bool hoverSpan = gp.isSelected && std::abs(e.position.x - freqToX(gp.centerFreqHz)) < (getWidth() * 0.1f * gp.radiusOctaves);

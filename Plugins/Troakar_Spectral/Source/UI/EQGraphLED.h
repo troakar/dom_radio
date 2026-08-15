@@ -31,7 +31,7 @@ private:
         { 
             if (paramID == "VIEW_RANGE") 
             {
-                owner.updateViewRange(static_cast<int>(*owner.processor.apvts.getRawParameterValue("VIEW_RANGE")));
+                owner.updateViewRange(owner.processor.getViewRangeIndex());
             }
             else
             {
@@ -57,7 +57,7 @@ private:
         }
 
         const int currentFFTMode =
-            static_cast<int>(*processor.apvts.getRawParameterValue("FFT_MODE"));
+            processor.getFFTModeIndex();
 
         if (currentFFTMode != lastFFTMode) {
             lastFFTMode = currentFFTMode;
@@ -76,7 +76,8 @@ private:
             p.upMaxDb         = *processor.apvts.getRawParameterValue(prefix + "_UP_MAX");
             p.downMaxDb       = -(*processor.apvts.getRawParameterValue(prefix + "_DOWN_MAX"));
             p.speedPct        = *processor.apvts.getRawParameterValue(prefix + "_SPEED");
-            p.smoothPct       = *processor.apvts.getRawParameterValue(prefix + "_SMOOTH");
+            p.upSmoothPct     = *processor.apvts.getRawParameterValue(prefix + "_UP_SMOOTH");
+            p.downSmoothPct   = *processor.apvts.getRawParameterValue(prefix + "_DOWN_SMOOTH");
             p.upSelectivity   = *processor.apvts.getRawParameterValue(prefix + "_UP_SEL");
             p.downSelectivity = *processor.apvts.getRawParameterValue(prefix + "_DOWN_SEL");
         }
@@ -96,6 +97,26 @@ private:
 
     float getTargetCurveDb(double freq) const;
     float getInterpolatedArray(const std::atomic<float>* arr, double freq, double sr) const;
+
+    float getTotalTargetDbAtFreq(float freq) const
+    {
+        float eqDb = getTargetCurveDb(freq);
+        float globalThresh = *processor.apvts.getRawParameterValue("GLOBAL_THRESH");
+        float gradOffset = 0.0f;
+
+        for (const auto& gp : gradientManager.points)
+        {
+            if (!gp.active) continue;
+            float logDist = std::abs(std::log2(freq / gp.centerFreqHz));
+            float normDist = logDist / std::max(0.1f, gp.radiusOctaves);
+            if (normDist < 1.0f)
+            {
+                float weight = 0.5f + 0.5f * std::cos(normDist * juce::MathConstants<float>::pi);
+                gradOffset += gp.centerGainDb * weight;
+            }
+        }
+        return eqDb + globalThresh + gradOffset;
+    }
 
     juce::Path& buildTargetCurvePath() const;
     void buildDeltaPaths();
