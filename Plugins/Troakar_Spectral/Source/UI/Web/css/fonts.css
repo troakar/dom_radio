@@ -1,0 +1,21 @@
+/* ===== FONT DECLARATIONS - Manley-style Soviet technical fonts ===== */
+
+/* GOST 2.304-81 type B - Soviet technical drafting font */
+@font-face {
+    font-family: 'GOST Type B';
+    src: url('../fonts/GOSTtypeB.woff') format('woff'),
+         url('../fonts/GOSTtypeB.ttf') format('truetype'),
+         url('../fonts/GOST2.304-81typeB.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* Russo One - Bold display font for headings */
+@font-face {
+    font-family: 'Russo One';
+    src: url('../fonts/RussoOne-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}

@@ -165,8 +165,15 @@ private:
     float baseViewDepth = 18.0f;
     float viewportOffset = 0.0f;
     float zoomIndicatorAlpha = 0.0f;
+
     void updateViewRange(int rangeIndex);
     void updateViewportFollow(float currentThreshold);
     void cycleViewRange(int direction);
+
+    // Кэшированная логарифмическая частотная сетка для спектра
+    std::vector<float> displayFrequencies;
+    int cachedNumDisplayPoints = 0;
+    void rebuildDisplayFrequencyGrid();
+
     const juce::Colour phosphor { juce::Colour::fromRGB(255, 176, 40) };
 };

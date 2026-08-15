@@ -1,0 +1,55 @@
+/* TROAKAR SPECTRAL - Gradient Filter Overlay Header Bar */
+
+.gradient-overlay-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px;
+    background: var(--panel-section-bg, #0e0c0a);
+    border: var(--border-medium, 2px) solid var(--panel-divider, #3a3430);
+    border-radius: 6px;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.gradient-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: #141210;
+    border: 1px solid #2a241e;
+    color: var(--text-secondary, #b8a88c);
+    font-family: var(--font-technical, monospace);
+    font-size: var(--font-small, 11px);
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.gradient-badge:hover {
+    border-color: var(--chassis-base, #d4a446);
+    color: var(--text-primary, #e8e4d9);
+}
+
+.gradient-badge.active {
+    background: rgba(212, 164, 70, 0.15);
+    border-color: var(--badge-color, var(--chassis-base, #d4a446));
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(212, 164, 70, 0.3);
+}
+
+.gradient-badge.active.global {
+    background: rgba(212, 164, 70, 0.2);
+    border-color: var(--chassis-base, #d4a446);
+}
+
+.badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    box-shadow: 0 0 5px currentColor;
+    flex-shrink: 0;
+}

@@ -102,7 +102,27 @@ void EQGraphLED::resized()
     for (int x = 0; x <= w; ++x)
         freqPerPixel[x] = xToFreq((float)x);
 
+    rebuildDisplayFrequencyGrid();
     targetPathDirty = true;
+}
+
+void EQGraphLED::rebuildDisplayFrequencyGrid()
+{
+    const int numPoints = juce::jmin(juce::jmax(64, getWidth() / 2), 400);
+    cachedNumDisplayPoints = numPoints;
+    displayFrequencies.resize(numPoints + 1);
+
+    const double sr = juce::jmax(44100.0, processor.getSampleRate());
+    const double nyquist = sr * 0.5;
+    const double maxFreq = nyquist * 0.98;
+    const double logMin = std::log10(20.0);
+    const double logMax = std::log10(juce::jmax(20.0, maxFreq));
+
+    for (int i = 0; i <= numPoints; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(numPoints);
+        const double logFreq = logMin + t * (logMax - logMin);
+        displayFrequencies[i] = static_cast<float>(std::pow(10.0, logFreq));
+    }
 }
 
 void EQGraphLED::cycleViewRange(int direction)
@@ -478,121 +498,176 @@ void EQGraphLED::drawSpectrumFog(juce::Graphics& g, const juce::Rectangle<float>
     const double binWidthHz = sr / static_cast<double>(fftSize);
     const double nyquistHz = sr * 0.5;
 
-    // Проверяем наличие сайдчейна
+    if (numBins < 2) return;
+
+    // Проверка наличия сайдчейна
     bool hasSidechainSignal = false;
-    for (int i = 0; i < std::min(numBins, 60); ++i) {
-        if (processor.sidechainData[i].load(std::memory_order_relaxed) > 1.0e-4f) {
+    for (int i = 1; i < numBins; ++i) {
+        if (processor.sidechainData[i].load(std::memory_order_relaxed) > 1.0e-7f) {
             hasSidechainSignal = true;
             break;
         }
     }
 
     // =========================================================================
-    // ТОЧНЫЙ ПИК-ПУЛИНГ ПО ПИКСЕЛЯМ ЭКРАНА
+    // ЛОГАРИФМИЧЕСКАЯ СЕТКА ЧАСТОТ (кешируется в resized())
     // =========================================================================
-    std::vector<float> mainCurveDb(w + 1, -100.0f);
-    std::vector<float> scCurveDb(w + 1, -100.0f);
 
-    for (int x = 0; x <= w; ++x) {
-        const double centerFreq = xToFreq(static_cast<float>(x));
-        if (centerFreq <= 20.0 || centerFreq >= nyquistHz) continue;
+    if (cachedNumDisplayPoints == 0)
+        rebuildDisplayFrequencyGrid();
 
-        // Определяем границы физического пикселя в герцах
-        const double freqLeft  = xToFreq(std::max(0.0f, static_cast<float>(x) - 0.5f));
-        const double freqRight = xToFreq(std::min(static_cast<float>(w), static_cast<float>(x) + 0.5f));
+    const int numDisplayPoints = cachedNumDisplayPoints;
+    const float* freqs = displayFrequencies.data();
 
-        // Перцептуальная компенсация — ТА ЖЕ, что и в детекторе
-        const float perceptualTiltDb = 3.0f * std::log2(std::max(20.0f, static_cast<float>(centerFreq)) / 1000.0f);
+    std::vector<float> mainDisplayDb(numDisplayPoints + 1, -100.0f);
+    std::vector<float> scDisplayDb(numDisplayPoints + 1, -100.0f);
 
-        // Если в пиксель помещается несколько бинов — логарифмический пик-пуллинг
-        if ((freqRight - freqLeft) > binWidthHz) {
-            int firstBin = juce::jlimit(1, numBins - 1, static_cast<int>(std::floor(freqLeft / binWidthHz)));
-            int lastBin  = juce::jlimit(1, numBins - 1, static_cast<int>(std::ceil(freqRight / binWidthHz)));
+    // =========================================================================
+    // ЧАСТОТНО-АДАПТИВНОЕ ОБЪЕДИНЕНИЕ FFT-БИНОВ С ВЗВЕШЕННЫМ МАКСИМУМОМ
+    // =========================================================================
 
-            const double logFreqLeft   = std::log10(juce::jmax(freqLeft, 20.0));
-            const double logFreqRight  = std::log10(juce::jmax(freqRight, 20.0));
-            const double logFreqCenter = std::log10(centerFreq);
-            const double logHalfBw     = (logFreqRight - logFreqLeft) * 0.5;
-            const double weightSigma   = logHalfBw * 0.25;
+    for (int i = 0; i <= numDisplayPoints; ++i) {
+        const double centerFreq = freqs[i];
+        if (centerFreq <= 20.0 || centerFreq >= nyquistHz)
+            continue;
 
-            float maxMainMagnitude = 0.0f;
-            float maxScMagnitude   = 0.0f;
+        // Адаптивная ширина полосы в октавах:
+        //   низ  → узко (~1/96 окт)  → почти каждый бин
+        //   верх → широко (~1/12 окт) → широкое объединение
+        const double freqNormOct = std::log2(centerFreq / 1000.0);
+        const double bandwidthOctaves = juce::jlimit(
+            1.0 / 96.0,
+            1.0 / 12.0,
+            (1.0 / 96.0) + (1.0 / 24.0) * std::abs(freqNormOct));
 
-            for (int b = firstBin; b <= lastBin; ++b) {
-                const double binFreq = b * binWidthHz;
-                const double logBinFreq = std::log10(juce::jmax(binFreq, 20.0));
-                const double distFromCenter = std::abs(logBinFreq - logFreqCenter);
-                const double weight = (weightSigma > 0.0)
-                    ? std::exp(-0.5 * distFromCenter * distFromCenter / (weightSigma * weightSigma))
-                    : 1.0;
+        const double radiusOctaves = bandwidthOctaves;
+        const double freqLeft  = centerFreq * std::pow(2.0, -radiusOctaves);
+        const double freqRight = centerFreq * std::pow(2.0,  radiusOctaves);
 
-                float rawMag = processor.spectrumDataLeft[b].load(std::memory_order_relaxed);
-                maxMainMagnitude = std::max(maxMainMagnitude, rawMag * (float)weight);
-                if (hasSidechainSignal) {
-                    float scMag = processor.sidechainData[b].load(std::memory_order_relaxed);
-                    maxScMagnitude = std::max(maxScMagnitude, scMag * (float)weight);
-                }
+        const int binLeft = juce::jlimit(1, numBins - 1,
+            static_cast<int>(std::floor(juce::jmax(20.0, freqLeft)  / binWidthHz)));
+        const int binRight = juce::jlimit(1, numBins - 1,
+            static_cast<int>(std::ceil(juce::jmax(20.0, freqRight)  / binWidthHz)));
+
+        // Перцептуальная компенсация (та же, что в детекторе)
+        const float perceptualTiltDb =
+            3.0f * std::log2(std::max(20.0f, static_cast<float>(centerFreq)) / 1000.0f);
+
+        // Гауссов вес в логарифмическом пространстве
+        const double logCenterFreq = std::log10(centerFreq);
+        const double logFreqLeft   = std::log10(juce::jmax(freqLeft,  20.0));
+        const double logFreqRight  = std::log10(juce::jmax(freqRight, 20.0));
+        const double logBandwidth  = logFreqRight - logFreqLeft;
+        const double weightSigma   = logBandwidth * 0.35;
+
+        float maxMainMag = 0.0f;
+        float maxScMag   = 0.0f;
+        float weightSum  = 0.0f;
+
+        for (int bin = binLeft; bin <= binRight; ++bin) {
+            const double binFreq = bin * binWidthHz;
+            const double logBinFreq = std::log10(juce::jmax(binFreq, 20.0));
+            const double distFromCenter = std::abs(logBinFreq - logCenterFreq);
+
+            const double weight = (weightSigma > 1.0e-9)
+                ? std::exp(-0.5 * distFromCenter * distFromCenter / (weightSigma * weightSigma))
+                : 1.0;
+
+            const float w = static_cast<float>(weight);
+
+            const float mainMag =
+                processor.spectrumDataLeft[bin].load(std::memory_order_relaxed);
+
+            if (mainMag > 0.0f) {
+                maxMainMag = std::max(maxMainMag, mainMag * w);
+                weightSum  += w;
             }
-
-            mainCurveDb[x] = (maxMainMagnitude > 1.0e-7f)
-                ? juce::Decibels::gainToDecibels(maxMainMagnitude) + perceptualTiltDb
-                : -100.0f;
-            if (hasSidechainSignal) scCurveDb[x] = (maxScMagnitude > 1.0e-7f)
-                ? juce::Decibels::gainToDecibels(maxScMagnitude) + perceptualTiltDb
-                : -100.0f;
-        } else {
-            // Если бины шире пикселя (зона НЧ) — линейная интерполяция
-            const double binPos = juce::jmax(1.0, centerFreq / binWidthHz);
-            int idx = juce::jlimit(1, numBins - 2, static_cast<int>(std::floor(binPos)));
-            float frac = static_cast<float>(binPos - idx);
-
-            float aMag = processor.spectrumDataLeft[idx].load(std::memory_order_relaxed);
-            float bMag = processor.spectrumDataLeft[idx + 1].load(std::memory_order_relaxed);
-
-            float interpMag = aMag + frac * (bMag - aMag);
-            mainCurveDb[x] = (interpMag > 1.0e-7f)
-                ? juce::Decibels::gainToDecibels(interpMag) + perceptualTiltDb
-                : -100.0f;
 
             if (hasSidechainSignal) {
-                float aSc = processor.sidechainData[idx].load(std::memory_order_relaxed);
-                float bSc = processor.sidechainData[idx + 1].load(std::memory_order_relaxed);
-                float interpSc = aSc + frac * (bSc - aSc);
-                scCurveDb[x] = (interpSc > 1.0e-7f)
-                    ? juce::Decibels::gainToDecibels(interpSc) + perceptualTiltDb
-                    : -100.0f;
+                const float scMag =
+                    processor.sidechainData[bin].load(std::memory_order_relaxed);
+                if (scMag > 0.0f)
+                    maxScMag = std::max(maxScMag, scMag * w);
             }
+        }
+
+        // Нормализация взвешенного максимума (коррекция на сжатие диапазона весов)
+        if (weightSum > 0.1f) {
+            const float normFactor = std::min(1.5f, 1.0f / weightSum);
+            maxMainMag *= normFactor;
+            maxScMag   *= normFactor;
+        }
+
+        mainDisplayDb[i] = (maxMainMag > 1.0e-7f)
+            ? juce::Decibels::gainToDecibels(maxMainMag) + perceptualTiltDb
+            : -100.0f;
+
+        if (hasSidechainSignal)
+            scDisplayDb[i] = (maxScMag > 1.0e-7f)
+                ? juce::Decibels::gainToDecibels(maxScMag) + perceptualTiltDb
+                : -100.0f;
+    }
+
+    // =========================================================================
+    // ДОПОЛНИТЕЛЬНОЕ СГЛАЖИВАНИЕ КРИВОЙ (скользящее среднее)
+    // =========================================================================
+
+    const int smoothRadius = 2;
+    const float smoothStrength = 0.5f; // 1.0 = полное сглаживание, 0.5 = вдвое слабее
+
+    std::vector<float> smoothedMain(numDisplayPoints + 1);
+    std::vector<float> smoothedSc(numDisplayPoints + 1);
+
+    for (int i = 0; i <= numDisplayPoints; ++i) {
+        float sumMain = 0.0f, sumSc = 0.0f, count = 0.0f;
+
+        const int lo = juce::jmax(0, i - smoothRadius);
+        const int hi = juce::jmin(numDisplayPoints, i + smoothRadius);
+
+        for (int k = lo; k <= hi; ++k) {
+            if (mainDisplayDb[k] > -99.0f) {
+                sumMain += mainDisplayDb[k];
+                if (hasSidechainSignal && scDisplayDb[k] > -99.0f)
+                    sumSc += scDisplayDb[k];
+                count += 1.0f;
+            }
+        }
+
+        if (count > 0.0f) {
+            const float averagedMain = sumMain / count;
+            smoothedMain[i] = mainDisplayDb[i] + (averagedMain - mainDisplayDb[i]) * smoothStrength;
+
+            if (hasSidechainSignal) {
+                const float averagedSc = sumSc / count;
+                smoothedSc[i] = scDisplayDb[i] + (averagedSc - scDisplayDb[i]) * smoothStrength;
+            }
+        } else {
+            smoothedMain[i] = mainDisplayDb[i];
+            smoothedSc[i]   = scDisplayDb[i];
         }
     }
 
-    // Заполняем края, чтобы график не уходил в бездну
-    int firstValid = -1, lastValid = -1;
-    for (int x = 0; x <= w; ++x) {
-        if (mainCurveDb[x] > -99.0f) {
-            if (firstValid == -1) firstValid = x;
-            lastValid = x;
-        }
-    }
-    if (firstValid > 0) {
-        for (int x = 0; x < firstValid; ++x) {
-            mainCurveDb[x] = mainCurveDb[firstValid];
-            if (hasSidechainSignal) scCurveDb[x] = scCurveDb[firstValid];
-        }
-    }
-    if (lastValid != -1 && lastValid < w) {
-        for (int x = lastValid + 1; x <= w; ++x) {
-            mainCurveDb[x] = mainCurveDb[lastValid];
-            if (hasSidechainSignal) scCurveDb[x] = scCurveDb[lastValid];
+    // =========================================================================
+    // ПОСТРОЕНИЕ ПЛАВНОЙ КРИВОЙ ЧЕРЕЗ ЛОГАРИФМИЧЕСКИЕ ТОЧКИ
+    // =========================================================================
+
+    cachedSpecPath.clear();
+    cachedScPath.clear();
+
+    bool firstPoint = true;
+    for (int i = 0; i <= numDisplayPoints; ++i) {
+        const float x = freqToX(freqs[i]);
+        const float yMain = juce::jlimit(0.0f, bounds.getBottom(),
+                                         gainToY(smoothedMain[i]));
+        if (firstPoint) {
+            cachedSpecPath.startNewSubPath(x, yMain);
+            firstPoint = false;
+        } else {
+            cachedSpecPath.lineTo(x, yMain);
         }
     }
 
     // Отрисовка Main Spectrum
-    cachedSpecPath.clear();
-    cachedSpecPath.startNewSubPath(0.0f, juce::jlimit(0.0f, bounds.getBottom(), gainToY(mainCurveDb[0])));
-    for (int x = 1; x <= w; ++x) {
-        cachedSpecPath.lineTo(static_cast<float>(x), juce::jlimit(0.0f, bounds.getBottom(), gainToY(mainCurveDb[x])));
-    }
-    
     if (!cachedSpecPath.isEmpty()) {
         juce::Path fillPath(cachedSpecPath);
         fillPath.lineTo(bounds.getRight(), bounds.getBottom());
@@ -610,10 +685,17 @@ void EQGraphLED::drawSpectrumFog(juce::Graphics& g, const juce::Rectangle<float>
 
     // Отрисовка Sidechain Spectrum
     if (hasSidechainSignal) {
-        cachedScPath.clear();
-        cachedScPath.startNewSubPath(0.0f, juce::jlimit(0.0f, bounds.getBottom(), gainToY(scCurveDb[0])));
-        for (int x = 1; x <= w; ++x) {
-            cachedScPath.lineTo(static_cast<float>(x), juce::jlimit(0.0f, bounds.getBottom(), gainToY(scCurveDb[x])));
+        bool firstScPoint = true;
+        for (int i = 0; i <= numDisplayPoints; ++i) {
+            const float x = freqToX(freqs[i]);
+            const float ySc = juce::jlimit(0.0f, bounds.getBottom(),
+                                           gainToY(smoothedSc[i]));
+            if (firstScPoint) {
+                cachedScPath.startNewSubPath(x, ySc);
+                firstScPoint = false;
+            } else {
+                cachedScPath.lineTo(x, ySc);
+            }
         }
         g.setColour(juce::Colour::fromRGB(40, 200, 255).withAlpha(0.6f));
         g.strokePath(cachedScPath, juce::PathStrokeType(1.2f));

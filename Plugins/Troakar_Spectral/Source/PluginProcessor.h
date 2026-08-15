@@ -37,6 +37,9 @@ public:
     int getCurrentFFTSize() const noexcept { return visualFFTSize.load(std::memory_order_acquire); }
     bool isEngineSettled() const { return spectralEngine.isEnvelopeSettled(); }
 
+    void setEditorSize (int width, int height) noexcept;
+    juce::Point<int> getEditorSize() const noexcept;
+
     int getFFTModeIndex() const noexcept;
     int getViewRangeIndex() const noexcept;
 
@@ -91,6 +94,9 @@ private:
 
     std::atomic<int> visualFFTSize { 512 };
     std::atomic<bool> requiresLatencyUpdate { false };
+
+    std::atomic<int> savedEditorWidth  { 1300 };
+    std::atomic<int> savedEditorHeight { 780 };
 
     static constexpr int MAX_BLOCK_SIZE = 16384; 
     

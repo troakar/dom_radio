@@ -10,6 +10,7 @@ juce_add_plugin(TroakarSpectral
     PLUGIN_CODE "TrkS"
     FORMATS VST3 Standalone
     PRODUCT_NAME "TROAKAR SPECTRAL"
+    NEEDS_WEBVIEW2 TRUE
 )
 
 if(ENABLE_ASAN)
@@ -19,11 +20,24 @@ endif()
 
 juce_generate_juce_header(TroakarSpectral)
 
+# Web UI assets (HTML, CSS, JS, fonts) — collected before binary data
+file(GLOB_RECURSE WEB_ASSETS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Web/index.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Web/css/*.css"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Web/css/components/*.css"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Web/js/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Web/js/components/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Web/js/models/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Web/js/config/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/UI/Web/fonts/*"
+)
+
 juce_add_binary_data(TroakarSpectralBinaryData
     NAMESPACE BinaryData
     SOURCES
-    ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/GOSTtypeB.ttf
-    ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/RussoOne-Regular.ttf
+        ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/GOSTtypeB.ttf
+        ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/RussoOne-Regular.ttf
+        ${WEB_ASSETS}
 )
 
 target_include_directories(TroakarSpectral PRIVATE
@@ -37,21 +51,17 @@ target_sources(TroakarSpectral PRIVATE
     Source/PluginEditor.cpp
     Source/PluginEditor.h
     Source/SpectralEngine.h
-    Source/UI/EQGraphLED.cpp
-    Source/UI/EQGraphLED.h
-    Source/UI/GradientBandModel.h
-    Source/UI/GradientKnob.h
-    Source/UI/GradientKnob.cpp
-    Source/UI/GradientFilterOverlay.h
-    Source/UI/GradientFilterOverlay.cpp
     ${CMAKE_SOURCE_DIR}/Shared/UI/LabeledKnob.h
     ${CMAKE_SOURCE_DIR}/Shared/UI/DomRadioLookAndFeel.cpp
     ${CMAKE_SOURCE_DIR}/Shared/UI/DomRadioLookAndFeel.h
     ${CMAKE_SOURCE_DIR}/Shared/UI/RetroFX.h
 )
 
-target_compile_definitions(TroakarSpectral PRIVATE
+target_compile_definitions(TroakarSpectral PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_WEB_BROWSER=1
+    JUCE_USE_WIN_WEBVIEW2=1
+    JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
 )
 
 target_link_libraries(TroakarSpectral PRIVATE
@@ -60,6 +70,7 @@ target_link_libraries(TroakarSpectral PRIVATE
     juce::juce_audio_devices
     juce::juce_dsp
     juce::juce_gui_basics
+    juce::juce_gui_extra
     TroakarSpectralBinaryData
 )
 

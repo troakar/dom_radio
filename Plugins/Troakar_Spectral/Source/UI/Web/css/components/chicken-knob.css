@@ -1,0 +1,148 @@
+/* Chichen Knob - Simplified Manley-style graphics */
+
+.chicken-knob {
+    position: relative;
+    cursor: ns-resize;
+    touch-action: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2;
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.chicken-knob.is-dragging {
+    cursor: ns-resize;
+}
+
+.chicken-knob.small  {
+    width: var(--knob-small);
+    height: var(--knob-small);
+}
+.chicken-knob.medium {
+    width: var(--knob-medium);
+    height: var(--knob-medium);
+}
+.chicken-knob.big    {
+    width: var(--knob-big);
+    height: var(--knob-big);
+}
+
+.knob-ticks {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.knob-ticks svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.knob-body {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    z-index: 2;
+    box-shadow:
+        0 8px 18px var(--knob-shadow),
+        0 3px 6px rgba(0, 0, 0, 0.6),
+        inset 0 2px 3px rgba(255, 255, 255, 0.15);
+}
+
+.chicken-knob.small  .knob-body { width: 40px; height: 40px; }
+.chicken-knob.medium .knob-body { width: 56px; height: 56px; }
+.chicken-knob.big    .knob-body { width: 72px; height: 72px; }
+
+.knob-skirt {
+    position: absolute;
+    top: -4px; left: -4px; right: -4px; bottom: -4px;
+    border-radius: 50%;
+    background: linear-gradient(135deg,
+        var(--knob-skirt) 0%,
+        var(--knob-body-highlight) 50%,
+        var(--knob-skirt) 100%);
+    border: var(--border-medium) solid var(--panel-border-thick);
+    box-shadow:
+        inset 0 0 6px rgba(0, 0, 0, 0.9),
+        0 2px 4px rgba(0, 0, 0, 0.6);
+    z-index: 1;
+}
+
+.knob-rotator {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    z-index: 4;
+}
+
+.knob-texture.ribbed {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%,
+        var(--knob-body-highlight) 0%,
+        var(--knob-body) 60%,
+        var(--knob-skirt) 100%);
+    border: var(--border-thick) solid var(--panel-border-thick);
+    box-shadow:
+        inset 0 2px 4px rgba(255, 255, 255, 0.2),
+        inset 0 -3px 6px rgba(0, 0, 0, 0.9);
+}
+
+.knob-pointer {
+    position: absolute;
+    left: 50%;
+    top: 8%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 38%;
+    background: linear-gradient(to bottom,
+        #ffffff 0%,
+        var(--knob-pointer) 100%);
+    border-radius: 3px;
+    box-shadow:
+        0 0 8px var(--knob-pointer-glow),
+        0 2px 4px rgba(0, 0, 0, 0.9),
+        inset 0 1px 1px rgba(255, 255, 255, 0.6);
+    z-index: 5;
+}
+
+.chicken-knob.big .knob-pointer {
+    width: 5px;
+    height: 40%;
+    top: 6%;
+}
+
+.chicken-knob.small .knob-pointer {
+    width: 3px;
+    height: 36%;
+    top: 10%;
+}
+
+.knob-center-dome {
+    position: absolute;
+    top: 28%;
+    left: 28%;
+    width: 44%;
+    height: 44%;
+    border-radius: 50%;
+    background: linear-gradient(135deg,
+        var(--knob-body-highlight) 0%,
+        var(--knob-center) 50%,
+        var(--knob-body-highlight) 100%);
+    border: var(--border-thin) solid var(--panel-border-thick);
+    box-shadow:
+        inset 0 2px 3px rgba(255, 255, 255, 0.2),
+        0 3px 6px var(--knob-shadow);
+    z-index: 6;
+}

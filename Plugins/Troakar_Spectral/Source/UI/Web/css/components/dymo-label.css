@@ -1,0 +1,15 @@
+.dymo-label {
+    font-size: var(--font-medium);
+    font-weight: 400;
+    font-family: var(--font-technical);
+    color: var(--text-label);
+    text-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.9),
+        0 -1px 0 rgba(255, 255, 255, 0.1),
+        0 0 8px var(--text-shadow);
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    text-align: center;
+    pointer-events: none;
+    line-height: 1.3;
+}

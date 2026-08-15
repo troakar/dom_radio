@@ -294,7 +294,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         "FFT_MODE", "FFT Size / Precision",
-        juce::StringArray { "512 (Fast / Low Latency)", "1024 (Balanced)", "2048 (Precise / Mastering)" }, 0));
+        juce::StringArray { "512 (Fast / Low Latency)", "1024 (Balanced)", "2048 (Precise / Mastering)" }, 1));
 
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         "DELTA_MODE", "Delta Listen", false));
@@ -623,58 +623,135 @@ juce::AudioProcessorEditor* TroakarSpectralAudioProcessor::createEditor()
     return new TroakarSpectralAudioProcessorEditor (*this);
 }
 
+void TroakarSpectralAudioProcessor::setEditorSize (
+    int width,
+    int /*height*/) noexcept
+{
+    constexpr double aspectRatio =
+        1300.0 / 780.0;
+
+    width = juce::jlimit (
+        975,
+        1950,
+        width);
+
+    const int height = juce::roundToInt (
+        width / aspectRatio);
+
+    savedEditorWidth.store (
+        width,
+        std::memory_order_relaxed);
+
+    savedEditorHeight.store (
+        height,
+        std::memory_order_relaxed);
+}
+
+juce::Point<int>
+TroakarSpectralAudioProcessor::getEditorSize() const noexcept
+{
+    return {
+        savedEditorWidth.load (std::memory_order_relaxed),
+        savedEditorHeight.load (std::memory_order_relaxed)
+    };
+}
+
 void TroakarSpectralAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+
+    state.setProperty (
+        "uiWidth",
+        savedEditorWidth.load (std::memory_order_relaxed),
+        nullptr);
+
+    state.setProperty (
+        "uiHeight",
+        savedEditorHeight.load (std::memory_order_relaxed),
+        nullptr);
+
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
 
 void TroakarSpectralAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
-    if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
-    {
-        apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
-        
-        gradientManager.points.clear();
-        
-        for (int i = 0; i < 4; ++i)
-        {
-            juce::String prefix = "GRADIENT_" + juce::String(i);
-            
-            if (*apvts.getRawParameterValue(prefix + "_ENABLE") > 0.5f)
-            {
-                GradientPoint pt;
-                pt.id = i;
-                pt.name = "G" + juce::String(i + 1);
-                pt.color = gradientManager.availableColors[i % gradientManager.availableColors.size()];
-                pt.active = true;
-                pt.isSelected = false;
-                
-                pt.centerFreqHz    = *apvts.getRawParameterValue(prefix + "_CENTER_FREQ");
-                pt.centerGainDb    = *apvts.getRawParameterValue(prefix + "_CENTER_GAIN");
-                pt.radiusOctaves   = *apvts.getRawParameterValue(prefix + "_BANDWIDTH");
-                pt.amountPct       = *apvts.getRawParameterValue(prefix + "_AMOUNT");
-                pt.upMaxDb         = *apvts.getRawParameterValue(prefix + "_UP_MAX");
-                pt.downMaxDb       = -(*apvts.getRawParameterValue(prefix + "_DOWN_MAX"));
-                pt.speedPct        = *apvts.getRawParameterValue(prefix + "_SPEED");
-                pt.upSmoothPct     = *apvts.getRawParameterValue(prefix + "_UP_SMOOTH");
-                pt.downSmoothPct   = *apvts.getRawParameterValue(prefix + "_DOWN_SMOOTH");
-                pt.upSelectivity   = *apvts.getRawParameterValue(prefix + "_UP_SEL");
-                pt.downSelectivity = *apvts.getRawParameterValue(prefix + "_DOWN_SEL");
-                
-                pt.useAutoSpeed    = *apvts.getRawParameterValue(prefix + "_AUTO_SPEED") > 0.5f;
-                pt.attackMs        = *apvts.getRawParameterValue(prefix + "_ATTACK");
-                pt.releaseMs       = *apvts.getRawParameterValue(prefix + "_RELEASE");
-                pt.kneeWidthDb     = *apvts.getRawParameterValue(prefix + "_KNEE");
-                
-                gradientManager.points.push_back(pt);
-            }
-        }
+    std::unique_ptr<juce::XmlElement> xmlState (
+        getXmlFromBinary (data, sizeInBytes));
 
-        spectralEngine.invalidateTarget();
+    if (xmlState == nullptr ||
+        !xmlState->hasTagName (apvts.state.getType()))
+        return;
+
+    auto restoredState =
+        juce::ValueTree::fromXml (*xmlState);
+
+    if (!restoredState.isValid())
+        return;
+
+    const auto width = juce::jlimit (
+        900,
+        2400,
+        static_cast<int> (
+            restoredState.getProperty (
+                "uiWidth",
+                savedEditorWidth.load())));
+
+    const auto height = juce::jlimit (
+        560,
+        1600,
+        static_cast<int> (
+            restoredState.getProperty (
+                "uiHeight",
+                savedEditorHeight.load())));
+
+    savedEditorWidth.store (
+        width,
+        std::memory_order_relaxed);
+
+    savedEditorHeight.store (
+        height,
+        std::memory_order_relaxed);
+
+    apvts.replaceState (restoredState);
+
+    gradientManager.points.clear();
+
+    for (int i = 0; i < 4; ++i)
+    {
+        juce::String prefix = "GRADIENT_" + juce::String(i);
+        
+        if (*apvts.getRawParameterValue(prefix + "_ENABLE") > 0.5f)
+        {
+            GradientPoint pt;
+            pt.id = i;
+            pt.name = "G" + juce::String(i + 1);
+            pt.color = gradientManager.availableColors[i % gradientManager.availableColors.size()];
+            pt.active = true;
+            pt.isSelected = false;
+            
+            pt.centerFreqHz    = *apvts.getRawParameterValue(prefix + "_CENTER_FREQ");
+            pt.centerGainDb    = *apvts.getRawParameterValue(prefix + "_CENTER_GAIN");
+            pt.radiusOctaves   = *apvts.getRawParameterValue(prefix + "_BANDWIDTH");
+            pt.amountPct       = *apvts.getRawParameterValue(prefix + "_AMOUNT");
+            pt.upMaxDb         = *apvts.getRawParameterValue(prefix + "_UP_MAX");
+            pt.downMaxDb       = -(*apvts.getRawParameterValue(prefix + "_DOWN_MAX"));
+            pt.speedPct        = *apvts.getRawParameterValue(prefix + "_SPEED");
+            pt.upSmoothPct     = *apvts.getRawParameterValue(prefix + "_UP_SMOOTH");
+            pt.downSmoothPct   = *apvts.getRawParameterValue(prefix + "_DOWN_SMOOTH");
+            pt.upSelectivity   = *apvts.getRawParameterValue(prefix + "_UP_SEL");
+            pt.downSelectivity = *apvts.getRawParameterValue(prefix + "_DOWN_SEL");
+            
+            pt.useAutoSpeed    = *apvts.getRawParameterValue(prefix + "_AUTO_SPEED") > 0.5f;
+            pt.attackMs        = *apvts.getRawParameterValue(prefix + "_ATTACK");
+            pt.releaseMs       = *apvts.getRawParameterValue(prefix + "_RELEASE");
+            pt.kneeWidthDb     = *apvts.getRawParameterValue(prefix + "_KNEE");
+            
+            gradientManager.points.push_back(pt);
+        }
     }
+
+    spectralEngine.invalidateTarget();
 }
 
 bool TroakarSpectralAudioProcessor::syncGradientPointsFromAPVTS()

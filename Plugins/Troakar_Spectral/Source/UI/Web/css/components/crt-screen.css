@@ -1,0 +1,24 @@
+.crt-screen-frame {
+    background: var(--panel-bg);
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow:
+        inset 0 6px 16px rgba(0, 0, 0, 0.95),
+        0 3px 6px rgba(255, 255, 255, 0.08);
+    border: var(--border-medium) solid var(--panel-border-thick);
+}
+
+.crt-screen {
+    background: var(--screen-bg);
+    border: var(--border-thick) solid var(--screen-bezel);
+    box-shadow:
+        inset 0 0 30px rgba(0, 0, 0, 0.9),
+        inset 0 0 60px rgba(0, 0, 0, 0.7);
+    display: block;
+    width: 1106px;
+    height: 414px;
+}
+
+.crt-screen canvas {
+    display: block;
+}

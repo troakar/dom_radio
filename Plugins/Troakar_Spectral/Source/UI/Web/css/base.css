@@ -1,0 +1,852 @@
+/* ===== BASE STYLES - Manley-inspired military aesthetic ===== */
+* {
+    box-sizing: border-box;
+    user-select: none;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: radial-gradient(ellipse at center, #12100d, #000000 80%);
+    overflow: hidden;
+    font-family: var(--font-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.device-chassis {
+    position: absolute;
+
+    left: 0;
+    top: 0;
+
+    width: 1300px;
+    height: 780px;
+
+    min-width: 1300px;
+    min-height: 780px;
+
+    max-width: 1300px;
+    max-height: 780px;
+
+    transform-origin: 0 0;
+    box-sizing: border-box;
+    background: linear-gradient(135deg,
+        var(--chassis-dark),
+        var(--chassis-base) 50%,
+        var(--chassis-light));
+    border-radius: 16px;
+    border: var(--border-thick) solid var(--chassis-dark);
+    box-shadow:
+        inset -8px -8px 24px rgba(0, 0, 0, 0.7),
+        inset 8px 8px 16px rgba(255, 255, 255, 0.1),
+        0 30px 60px rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 12px;
+    overflow: hidden;
+}
+
+.chassis-texture {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background:
+        repeating-linear-gradient(
+            90deg,
+            transparent 0px,
+            rgba(0, 0, 0, 0.03) 1px,
+            transparent 2px
+        );
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.chassis-highlight {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(160deg,
+        rgba(255, 255, 255, 0.12) 0%,
+        rgba(255, 255, 255, 0) 45%);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.panel {
+    position: relative;
+    z-index: 10;
+    background: var(--panel-bg);
+    border: var(--border-thick) solid var(--panel-border-thick);
+    border-radius: 8px;
+    box-shadow:
+        inset 0 4px 12px rgba(0, 0, 0, 0.85),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(to bottom,
+        rgba(10, 9, 8, 0.4) 0%,
+        transparent 15%,
+        transparent 85%,
+        rgba(0, 0, 0, 0.5) 100%);
+    border-radius: 6px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.panel-engraving {
+    position: absolute;
+    font-family: var(--font-technical);
+    font-size: var(--font-medium);
+    font-weight: 400;
+    color: var(--text-label);
+    text-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.8),
+        0 0 8px var(--text-shadow);
+    letter-spacing: 2.5px;
+    z-index: 5;
+}
+
+.top-panel {
+    height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+}
+
+.brand h1 {
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: var(--font-title);
+    font-weight: 400;
+    letter-spacing: 4px;
+    text-shadow:
+        0 0 12px var(--text-shadow),
+        0 2px 4px rgba(0, 0, 0, 0.8);
+    flex-shrink: 0;
+}
+
+.brand .subtitle {
+    color: var(--text-secondary);
+    font-family: var(--font-technical);
+    font-size: var(--font-small);
+    font-weight: 400;
+    letter-spacing: 2px;
+    opacity: 0.9;
+}
+
+.top-controls {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.combo-box {
+    background: var(--panel-section-bg);
+    border: var(--border-medium) solid var(--panel-divider);
+    color: var(--text-primary);
+    font-family: var(--font-technical);
+    font-size: var(--font-medium);
+    font-weight: 400;
+    padding: 8px 16px;
+    border-radius: 4px;
+    width: 150px;
+    text-align: center;
+    cursor: pointer;
+    box-shadow:
+        inset 0 2px 8px rgba(0, 0, 0, 0.9),
+        0 1px 2px rgba(255, 255, 255, 0.05);
+    transition: all 0.2s ease;
+}
+
+.combo-box:hover {
+    border-color: var(--chassis-base);
+}
+
+.combo-box:focus {
+    outline: none;
+    border-color: var(--chassis-accent);
+    box-shadow:
+        inset 0 2px 8px rgba(212, 164, 70, 0.3),
+        0 0 12px rgba(212, 164, 70, 0.4);
+}
+
+.main-workspace {
+    display: flex;
+    gap: 12px;
+    height: 492px;
+}
+
+.left-panel {
+    width: 130px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-evenly;
+    padding: 20px 10px;
+    flex-shrink: 0;
+}
+
+.screen-container {
+    width: 1128px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.crt-bezel {
+    background: var(--screen-bezel);
+    border-radius: 10px;
+    border: var(--border-extra-thick) solid var(--panel-border-thick);
+    padding: 8px;
+    box-shadow:
+        inset 0 0 30px rgba(0, 0, 0, 0.95),
+        inset 0 0 0 var(--border-medium) #0a0a0a,
+        0 4px 8px rgba(0, 0, 0, 0.8);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+}
+
+.crt-glass-glare {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(160deg,
+        var(--screen-glare) 0%,
+        rgba(255, 255, 255, 0) 40%);
+    pointer-events: none;
+    z-index: 5;
+    border-radius: 6px;
+}
+
+.crt-screen {
+    display: block;
+}
+
+.bottom-panel {
+    height: 164px;
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    padding: 14px 20px;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.bottom-panel .section-block {
+    height: 100%;
+}
+
+.bottom-panel .column-block {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 100%;
+}
+
+.section-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: var(--panel-section-bg);
+    border: var(--border-medium) solid var(--panel-section-border);
+    border-radius: 8px;
+    padding: 28px 18px 14px 18px;
+    box-shadow:
+        inset 0 3px 8px rgba(0, 0, 0, 0.9),
+        0 2px 4px rgba(255, 255, 255, 0.05);
+}
+
+.section-block .knobs-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 16px;
+}
+
+.section-block-title {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-technical);
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-label);
+    letter-spacing: 2.8px;
+    text-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.9),
+        0 0 8px var(--text-shadow);
+    white-space: nowrap;
+}
+
+.knobs-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 18px;
+}
+
+.column-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.knob-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.knob-label {
+    font-family: var(--font-technical);
+    font-size: var(--font-small);
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+}
+
+.knob-value-display {
+    font-family: var(--font-technical);
+    font-size: var(--font-medium);
+    font-weight: 400;
+    color: var(--text-value);
+    text-shadow:
+        0 0 6px var(--text-shadow),
+        0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.vertical-divider {
+    width: var(--border-medium);
+    height: 130px;
+    background: linear-gradient(to bottom,
+        transparent 0%,
+        var(--panel-divider) 20%,
+        var(--chassis-base) 50%,
+        var(--panel-divider) 80%,
+        transparent 100%);
+    box-shadow:
+        1px 0 0 rgba(0, 0, 0, 0.8),
+        -1px 0 0 rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.link-button-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 4px 0;
+}
+
+/* ===== SPECTRAL TIMING (FIXED LAYOUT) ===== */
+
+.timing-section {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 24px 16px 12px 16px;
+}
+
+/* Кнопка A абсолютно позиционирована в углу — НЕ влияет на ручки */
+.timing-mode-button {
+    position: absolute !important;
+    top: 6px !important;
+    right: 8px !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    width: 24px !important;
+    height: 24px !important;
+    min-width: 24px !important;
+    padding: 0 !important;
+    font-size: 11px !important;
+    font-weight: bold !important;
+    line-height: 22px !important;
+    text-align: center !important;
+    border-radius: 4px !important;
+    z-index: 20 !important;
+}
+
+/* Контейнер видов */
+.timing-container {
+    position: relative;
+    height: 125px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+/* Экраны режимов */
+.timing-view {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease-in-out;
+}
+
+.timing-view.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Опускаем ручку SPEED чуть ниже надписи в авто-режиме */
+.timing-view-auto .chicken-knob.big {
+    transform: translateY(6px);
+}
+
+/* Подгонка подписей в manual режиме — крупнее, как у соседей */
+.timing-view-manual .dymo-label {
+    font-size: var(--font-medium);
+    letter-spacing: 2px;
+}
+
+/* ===== SPECTRAL TIMING END ===== */
+
+/* Fixed 900x540 window, 1300x780 artboard scaled via CSS transform.
+   Scale: 900/1300 = 540/780 = 0.6923076923 */
+html,
+body {
+    width: 900px !important;
+    height: 540px !important;
+    min-width: 900px !important;
+    min-height: 540px !important;
+    max-width: 900px !important;
+    max-height: 540px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #080808 !important;
+}
+
+body {
+    position: relative !important;
+    display: block !important;
+}
+
+.device-chassis {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 1300px !important;
+    height: 780px !important;
+    min-width: 1300px !important;
+    min-height: 780px !important;
+    max-width: 1300px !important;
+    max-height: 780px !important;
+    box-sizing: border-box !important;
+    transform-origin: 0 0 !important;
+    transform: translate3d(0, 0, 0) scale(0.6923076923) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    padding: 12px !important;
+    overflow: hidden !important;
+}
+
+/* Budget: 6 border + 24 padding + 12 gap + 70 + 12 gap + 492 + 12 gap + 164 = 780 */
+.top-panel {
+    flex: 0 0 70px !important;
+    height: 70px !important;
+    min-height: 70px !important;
+    max-height: 70px !important;
+    flex-shrink: 0 !important;
+}
+
+.main-workspace {
+    flex: 0 0 492px !important;
+    height: 492px !important;
+    min-height: 492px !important;
+    max-height: 492px !important;
+    flex-shrink: 0 !important;
+}
+
+.bottom-panel {
+    flex: 0 0 164px !important;
+    height: 164px !important;
+    min-height: 164px !important;
+    max-height: 164px !important;
+    flex-shrink: 0 !important;
+}
+
+/* Bottom panel grid: amount | 2px | upward | 2px | downward | 2px | timing */
+.bottom-panel {
+    display: grid !important;
+    grid-template-columns:
+        130px
+        2px
+        304px
+        2px
+        304px
+        2px
+        minmax(0, 1fr) !important;
+    column-gap: 12px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+.bottom-panel > .column-block {
+    width: 130px !important;
+    min-width: 130px !important;
+    max-width: 130px !important;
+}
+
+.bottom-panel > .vertical-divider {
+    width: 2px !important;
+    min-width: 2px !important;
+    max-width: 2px !important;
+}
+
+.bottom-panel > .section-block,
+.bottom-panel > .timing-section {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+.bottom-panel .section-block-title {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    font-size: 12px !important;
+    letter-spacing: 1.5px !important;
+}
+
+/* Width: 130 + 12 + 1128 = 1270 (inner chassis width) */
+.main-workspace {
+    display: flex !important;
+    align-items: stretch !important;
+    width: 1270px !important;
+    min-width: 1270px !important;
+    max-width: 1270px !important;
+}
+
+.left-panel {
+    flex: 0 0 130px !important;
+    width: 130px !important;
+    min-width: 130px !important;
+    max-width: 130px !important;
+}
+
+.screen-container {
+    flex: 0 0 1128px !important;
+    width: 1128px !important;
+    min-width: 1128px !important;
+    max-width: 1128px !important;
+}
+
+.crt-bezel {
+    width: 1128px !important;
+    height: 492px !important;
+    box-sizing: border-box !important;
+}
+
+.crt-screen {
+    width: 1104px !important;
+    height: 468px !important;
+}
+
+.top-panel,
+.main-workspace,
+.bottom-panel,
+.left-panel,
+.screen-container,
+.crt-bezel,
+.section-block,
+.column-block,
+.knob-group,
+.knobs-row,
+.vertical-divider,
+.link-button-wrapper {
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+/* ============================================================
+   FINAL FIXED LAYOUT
+   Larger bottom control panel (220px), smaller spectrum
+   workspace (436px). Artboard remains 1300x780.
+
+   Vertical budget:
+   6 border + 24 padding + 12 gap + 70 top + 12 gap
+   + 436 workspace + 12 gap + 220 bottom = 780
+   ============================================================ */
+
+.top-panel {
+    flex: 0 0 70px !important;
+    height: 70px !important;
+    min-height: 70px !important;
+    max-height: 70px !important;
+}
+
+.main-workspace {
+    flex: 0 0 436px !important;
+    width: 1270px !important;
+    height: 436px !important;
+    min-width: 1270px !important;
+    max-width: 1270px !important;
+    min-height: 436px !important;
+    max-height: 436px !important;
+    gap: 12px !important;
+    overflow: hidden !important;
+}
+
+.left-panel {
+    flex: 0 0 130px !important;
+    width: 130px !important;
+    min-width: 130px !important;
+    max-width: 130px !important;
+    height: 436px !important;
+    min-height: 436px !important;
+    max-height: 436px !important;
+}
+
+.screen-container {
+    flex: 0 0 1128px !important;
+    width: 1128px !important;
+    min-width: 1128px !important;
+    max-width: 1128px !important;
+    height: 436px !important;
+    min-height: 436px !important;
+    max-height: 436px !important;
+}
+
+.crt-bezel {
+    width: 1128px !important;
+    height: 436px !important;
+    min-width: 1128px !important;
+    max-width: 1128px !important;
+    min-height: 436px !important;
+    max-height: 436px !important;
+    box-sizing: border-box !important;
+}
+
+.crt-screen {
+    display: block !important;
+    width: 1104px !important;
+    height: 412px !important;
+    min-width: 1104px !important;
+    max-width: 1104px !important;
+    min-height: 412px !important;
+    max-height: 412px !important;
+}
+
+.bottom-panel {
+    flex: 0 0 220px !important;
+    width: 1270px !important;
+    height: 220px !important;
+    min-width: 1270px !important;
+    max-width: 1270px !important;
+    min-height: 220px !important;
+    max-height: 220px !important;
+
+    display: grid !important;
+    grid-template-columns:
+        130px
+        2px
+        304px
+        2px
+        304px
+        2px
+        minmax(0, 1fr) !important;
+    column-gap: 12px !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    padding: 14px 20px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+.bottom-panel > .column-block {
+    width: 130px !important;
+    min-width: 0 !important;
+    max-width: 130px !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: visible !important;
+}
+
+.bottom-panel > .vertical-divider {
+    width: 2px !important;
+    min-width: 2px !important;
+    max-width: 2px !important;
+    height: calc(100% - 12px) !important;
+    align-self: center !important;
+}
+
+.bottom-panel > .section-block {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    padding: 32px 12px 12px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+.bottom-panel .knobs-row {
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-evenly !important;
+    gap: 10px !important;
+}
+
+.bottom-panel .knob-group {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+}
+
+.bottom-panel .section-block-title {
+    top: 9px !important;
+    font-size: 13px !important;
+    line-height: 16px !important;
+    letter-spacing: 2px !important;
+    width: calc(100% - 20px) !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+}
+
+.bottom-panel .knob-value-display {
+    display: block !important;
+    min-height: 16px !important;
+    line-height: 16px !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+}
+
+.bottom-panel .dymo-label {
+    display: block !important;
+    min-height: 16px !important;
+    line-height: 16px !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+}
+
+/* ============================================================
+   SPECTRAL TIMING
+   ============================================================ */
+
+.bottom-panel > .timing-section {
+    position: relative !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 100% !important;
+    padding: 32px 12px 12px 12px !important;
+    overflow: hidden !important;
+}
+
+.timing-section .section-block-title {
+    top: 9px !important;
+    width: calc(100% - 56px) !important;
+    font-size: 12px !important;
+    letter-spacing: 1.4px !important;
+    text-align: center !important;
+}
+
+.timing-container {
+    position: relative !important;
+    width: 100% !important;
+    height: 160px !important;
+    min-width: 0 !important;
+    min-height: 160px !important;
+    display: block !important;
+    overflow: hidden !important;
+}
+
+.timing-view {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
+}
+
+.timing-view-auto .chicken-knob.big {
+    transform: none !important;
+}
+
+.timing-view-auto .knob-group {
+    height: 100% !important;
+    justify-content: center !important;
+    gap: 6px !important;
+}
+
+.timing-view-manual .knobs-row {
+    width: 100% !important;
+    height: 100% !important;
+    align-items: center !important;
+    justify-content: space-evenly !important;
+    gap: 8px !important;
+}
+
+.timing-mode-button {
+    position: absolute !important;
+    top: 7px !important;
+    right: 8px !important;
+    width: 26px !important;
+    height: 26px !important;
+    min-width: 26px !important;
+    min-height: 26px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    line-height: 22px !important;
+    z-index: 30 !important;
+}

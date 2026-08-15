@@ -1,0 +1,89 @@
+:root {
+    /* ===== CHASSIS COLORS ===== */
+    --chassis-base: #d4a446;
+    --chassis-dark: #b8923d;
+    --chassis-light: #e8b95c;
+    --chassis-accent: #f0c872;
+
+    /* ===== PANEL COLORS ===== */
+    --panel-bg: #1a1816;
+    --panel-border: #0a0908;
+    --panel-border-thick: #000000;
+    --panel-divider: #3a3430;
+    --panel-section-bg: #0e0c0a;
+    --panel-section-border: #d4a446;
+
+    /* ===== TEXT COLORS ===== */
+    --text-primary: #e8e4d9;
+    --text-secondary: #b8a88c;
+    --text-label: #d4a446;
+    --text-value: #f0c872;
+    --text-engraved: #0a0908;
+    --text-shadow: rgba(244, 196, 114, 0.3);
+
+    /* ===== KNOB COLORS ===== */
+    --knob-body: #2a2622;
+    --knob-body-highlight: #3e3832;
+    --knob-skirt: #1a1614;
+    --knob-pointer: #f4c472;
+    --knob-pointer-glow: rgba(244, 196, 114, 0.8);
+    --knob-tick: #d4a446;
+    --knob-tick-minor: #6e5d4a;
+    --knob-center: #1a1614;
+    --knob-shadow: rgba(0, 0, 0, 0.9);
+
+    /* ===== LED COLORS ===== */
+    --led-red-on: #ff3b30;
+    --led-red-glow: rgba(255, 59, 48, 0.8);
+    --led-red-shadow: rgba(255, 59, 48, 0.4);
+
+    --led-amber-on: #f09511;
+    --led-amber-glow: rgba(240, 149, 17, 0.8);
+    --led-amber-shadow: rgba(240, 149, 17, 0.4);
+
+    --led-cyan-on: #28c8d4;
+    --led-cyan-glow: rgba(40, 200, 212, 0.8);
+    --led-cyan-shadow: rgba(40, 200, 212, 0.4);
+
+    /* ===== SCREEN COLORS ===== */
+    --screen-bg: #0d0b08;
+    --screen-bezel: #050505;
+    --screen-glare: rgba(255, 255, 255, 0.08);
+    --screen-phosphor: #f4c472;
+    --screen-phosphor-dim: #b8923d;
+    --screen-grid: rgba(212, 164, 70, 0.15);
+
+    /* ===== SIZES AND METRICS ===== */
+    --chassis-width: 1300px;
+    --chassis-height: 780px;
+
+    --border-thin: 1px;
+    --border-medium: 2px;
+    --border-thick: 3px;
+    --border-extra-thick: 4px;
+
+    --font-small: 11px;
+    --font-medium: 13px;
+    --font-large: 15px;
+    --font-xlarge: 19px;
+    --font-title: 24px;
+
+    --knob-small: 52px;
+    --knob-medium: 72px;
+    --knob-big: 92px;
+
+    --button-padding: 10px 18px;
+    --button-padding-small: 8px 14px;
+
+    /* ===== FONTS ===== */
+    --font-technical: 'GOST Type B', 'Courier New', monospace;
+    --font-display: 'Russo One', 'Arial Black', 'Impact', sans-serif;
+    --font-primary: 'GOST Type B', 'Helvetica Neue', 'Arial', sans-serif;
+    --font-mono: 'GOST Type B', 'Courier New', monospace;
+
+    /* Legacy compatibility */
+    --phosphor: var(--screen-phosphor);
+    --phosphor-dim: var(--screen-phosphor-dim);
+    --font-stencil: var(--font-technical);
+    --font-dymo: var(--font-display);
+}
