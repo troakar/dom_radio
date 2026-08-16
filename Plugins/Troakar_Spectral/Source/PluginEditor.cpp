@@ -117,22 +117,18 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
     webView->goToURL (juce::WebBrowserComponent::getResourceProviderRoot());
 
     /*
-        Fixed editor window at 900x540. The CSS artboard
-        is 1300x780 and is scaled down via CSS transform
-        to fit this window.
-    */
-     /*
         Logical Web UI artboard:
             1300 x 780
-
-        New editor, exactly +10%:
-            990 x 594
-
-        990 / 1300 == 594 / 780
-        scale = 0.7615384615
     */
-    setResizable (false, false);
-    setSize (990, 594);
+    setResizable (true, true);
+    // Лимиты: от 50% (650x390) до 200% (2600x1560)
+    setResizeLimits (650, 390, 2600, 1560);
+    
+    if (auto* constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio (1300.0 / 780.0);
+
+    auto savedSize = processor.getEditorSize();
+    setSize (savedSize.x, savedSize.y);
 
     startTimerHz (10);
 }
@@ -154,6 +150,9 @@ void TroakarSpectralAudioProcessorEditor::resized()
 {
     if (webView != nullptr)
         webView->setBounds (getLocalBounds());
+        
+    // Сообщаем процессору актуальный размер для сохранения в пресет/DAW
+    processor.setEditorSize (getWidth(), getHeight());
 }
 
 void TroakarSpectralAudioProcessorEditor::parameterChanged (const juce::String& parameterID, float)

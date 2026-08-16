@@ -728,8 +728,8 @@ void TroakarSpectralAudioProcessor::setEditorSize (
         1300.0 / 780.0;
 
     width = juce::jlimit (
-        990,
-        1950,
+        650,
+        2600,
         width);
 
     const int height = juce::roundToInt (
@@ -787,16 +787,16 @@ void TroakarSpectralAudioProcessor::setStateInformation (const void* data, int s
         return;
 
     const auto width = juce::jlimit (
-        900,
-        2400,
+        650,
+        2600,
         static_cast<int> (
             restoredState.getProperty (
                 "uiWidth",
                 savedEditorWidth.load())));
 
     const auto height = juce::jlimit (
-        560,
-        1600,
+        390,
+        1560,
         static_cast<int> (
             restoredState.getProperty (
                 "uiHeight",

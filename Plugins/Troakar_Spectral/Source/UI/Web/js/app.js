@@ -92,6 +92,19 @@
         console.log('Troakar Spectral - Full Engine Initialized');
 
         // ================================================================
+        // 0. Responsive UI Scaling
+        // ================================================================
+        function updateUiScale() {
+            var artboardWidth = 1300;
+            var artboardHeight = 780;
+            // Рассчитываем множитель (Math.min гарантирует, что интерфейс всегда впишется)
+            var scale = Math.min(window.innerWidth / artboardWidth, window.innerHeight / artboardHeight);
+            document.documentElement.style.setProperty('--ui-scale', scale);
+        }
+        window.addEventListener('resize', updateUiScale);
+        updateUiScale(); // первичная инициализация масштаба
+
+        // ================================================================
         // 1. Core model + overlay + screen
         // ================================================================
         var gradientManager   = new GradientManager();
