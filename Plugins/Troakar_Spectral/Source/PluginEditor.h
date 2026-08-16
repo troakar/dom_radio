@@ -17,6 +17,8 @@ private:
     TroakarSpectralAudioProcessor& processor;
     std::unique_ptr<juce::WebBrowserComponent> webView;
 
+    bool contextMenuGuardInjected = false;
+
     void timerCallback() override;
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     std::optional<juce::WebBrowserComponent::Resource> getResource (const juce::String& path);

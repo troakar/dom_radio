@@ -37,6 +37,16 @@ public:
     int getCurrentFFTSize() const noexcept { return visualFFTSize.load(std::memory_order_acquire); }
     bool isEngineSettled() const { return spectralEngine.isEnvelopeSettled(); }
 
+    int getSpectrumBinCount() const noexcept;
+    int getSidechainBinCount() const noexcept;
+    int getCompressionDeltaBinCount() const noexcept;
+    int getDetectorBinCount() const noexcept;
+    int getEffectiveTargetBinCount() const noexcept;
+
+    float getAuditionFrequencyHz() const;
+    float getAuditionWidthOctaves() const;
+    bool isAuditionEnabled() const noexcept;
+
     void setEditorSize (int width, int height) noexcept;
     juce::Point<int> getEditorSize() const noexcept;
 
@@ -61,6 +71,9 @@ public:
     std::atomic<float> spectrumDataLeft[MAX_FFT_BINS];
     std::atomic<float> compressionDeltaData[MAX_FFT_BINS];
     std::atomic<float> sidechainData[MAX_FFT_BINS];
+
+    std::atomic<float> detectorData[MAX_FFT_BINS];
+    std::atomic<float> effectiveTargetData[MAX_FFT_BINS];
 
     float prevInGain = 1.0f;
     float prevOutGain = 1.0f;
@@ -95,8 +108,8 @@ private:
     std::atomic<int> visualFFTSize { 512 };
     std::atomic<bool> requiresLatencyUpdate { false };
 
-    std::atomic<int> savedEditorWidth  { 1300 };
-    std::atomic<int> savedEditorHeight { 780 };
+    std::atomic<int> savedEditorWidth  { 990 };
+    std::atomic<int> savedEditorHeight { 594 };
 
     static constexpr int MAX_BLOCK_SIZE = 16384; 
     
@@ -143,6 +156,10 @@ private:
     std::atomic<float>* pReleaseMs = nullptr;
     std::atomic<float>* pKneeWidth = nullptr;
     std::atomic<float>* pLookaheadMs = nullptr;
+
+    std::atomic<float>* pAuditionEnable = nullptr;
+    std::atomic<float>* pAuditionFreq = nullptr;
+    std::atomic<float>* pAuditionWidth = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TroakarSpectralAudioProcessor)
 };

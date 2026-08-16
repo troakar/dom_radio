@@ -15,10 +15,35 @@
             this.ctx             = this.canvas.getContext('2d');
             this.gradientManager = gradientManager;
 
-        this.baseViewDepth = 72.0;
-        this.maxDb         = 12.0;
-        this.minDb         = this.maxDb - this.baseViewDepth;
-        this.sampleRate    = 44100.0;
+            /*
+                Fixed TROAKAR SPECTRAL display range.
+
+                    top:    +12 dB
+                    bottom: -96 dB
+                    total:  108 dB
+
+                This must never be altered by VIEW_RANGE,
+                Ctrl + Wheel, presets, or host automation.
+            */
+            this.displayMaxDb   = 12.0;
+            this.displayMinDb   = -96.0;
+            this.displayRangeDb = 108.0;
+
+            /*
+                Compatibility aliases.
+                Existing renderer methods use minDb/maxDb,
+                so retain these names but keep them immutable.
+            */
+            this.maxDb = this.displayMaxDb;
+            this.minDb = this.displayMinDb;
+
+            /*
+                Legacy field retained so old external code
+                cannot fail if it reads baseViewDepth.
+            */
+            this.baseViewDepth = this.displayRangeDb;
+
+            this.sampleRate    = 44100.0;
 
         this.fftSize = 512;
         this.numBins = this.fftSize / 2 + 1;
@@ -64,10 +89,39 @@
             // Spectrum data
             this.spectrumData   = new Float32Array(this.numBins).fill(-100.0);
             this.sidechainData  = new Float32Array(this.numBins).fill(-100.0);
-            this.deltaData      = new Float32Array(this.numBins).fill(0.0);
+            this.deltaData =
+                new Float32Array(this.numBins).fill(0.0);
 
-            // Cached target curve per pixel
+            this.detectorData =
+                new Float32Array(
+                    this.numBins
+                ).fill(-120.0);
+
+            this.effectiveTargetData =
+                new Float32Array(
+                    this.numBins
+                ).fill(0.0);
+
+            /*
+                displayMode:
+
+                'detector':
+                    Shows the exact DSP detector
+                    envelope and effective target.
+
+                'spectrum':
+                    Shows the raw input FFT magnitude.
+                    Legacy mode — may not visually
+                    align with DSP compressor action.
+            */
+            this.displayMode = 'detector';
+
+            /*
+                Avoid accessing .length on undefined during
+                the first render frame.
+            */
             this.targetDbPerPixel = [];
+
             this.targetCurveDirty = true;
             this.animationFrameId = 0;
             this.hasNativeAnalysis = false;
@@ -86,7 +140,25 @@
             this.onGradientSelectionChanged = null;
             this.onGradientParamsChanged    = null;
 
+            /*
+                Called by app.js while Δ audition is active.
+
+                Arguments:
+                    frequencyHz
+                    widthOctaves
+                    sourceType: 'eq' | 'gradient' | 'none'
+                    sourceId
+            */
+            this.onAuditionFocusChanged = null;
+
+            this.lastAuditionFrequencyHz = -1.0;
+            this.lastAuditionWidthOctaves = -1.0;
+            this.lastAuditionSource = '';
+            this.lastAuditionSourceId = -1;
+
             this.resize();
+            this.lastRightClickTime = 0;
+            this.installContextMenuGuard();
             this.initEvents();
             this.fetchAllParameters();
             this.startLoop();
@@ -114,6 +186,16 @@
             const incomingDelta =
                 Array.isArray(data.delta)
                     ? data.delta
+                    : [];
+
+            const incomingDetector =
+                Array.isArray(data.detector)
+                    ? data.detector
+                    : [];
+
+            const incomingEffectiveTarget =
+                Array.isArray(data.effectiveTarget)
+                    ? data.effectiveTarget
                     : [];
 
             this.analysisFormat =
@@ -144,6 +226,16 @@
 
                 this.deltaData =
                     new Float32Array(this.numBins);
+
+                this.detectorData =
+                    new Float32Array(
+                        this.numBins
+                    );
+
+                this.effectiveTargetData =
+                    new Float32Array(
+                        this.numBins
+                    );
             }
 
             const sidechainFormat =
@@ -187,6 +279,62 @@
                             : 0.0;
                 } else {
                     this.deltaData[i] = 0.0;
+                }
+
+                if (i < incomingDetector.length) {
+                    const detectorValue =
+                        Number(
+                            incomingDetector[i]
+                        );
+
+                    this.detectorData[i] =
+                        Number.isFinite(
+                            detectorValue
+                        )
+                            ? Math.max(
+                                -120.0,
+                                Math.min(
+                                    24.0,
+                                    detectorValue
+                                )
+                            )
+                            : -120.0;
+                } else {
+                    this.detectorData[i] =
+                        -120.0;
+                }
+
+                if (i < incomingEffectiveTarget.length) {
+                    const targetValue =
+                        Number(
+                            incomingEffectiveTarget[i]
+                        );
+
+                    this.effectiveTargetData[i] =
+                        Number.isFinite(
+                            targetValue
+                        )
+                            ? Math.max(
+                                -120.0,
+                                Math.min(
+                                    120.0,
+                                    targetValue
+                                )
+                            )
+                            : this.getTargetCurveDb(
+                                this.xToFreq(
+                                    i
+                                    / Math.max(
+                                        1,
+                                        this.numBins
+                                            - 1
+                                    )
+                                    * this.width
+                                )
+                            );
+                } else {
+                    this.effectiveTargetData[i] =
+                        0.0;
                 }
             }
 
@@ -244,6 +392,53 @@
             (bins - 1) /
             nyquist;
     }
+
+        frequencyToBinForScale(
+            freq,
+            arrayLength,
+            scale
+        ) {
+            var bins = Math.max(
+                1,
+                Number(arrayLength)
+                    || this.numBins
+            );
+
+            var safeFreq = Math.max(
+                20.0,
+                Math.min(
+                    this.sampleRate * 0.5,
+                    Number(freq) || 20.0
+                )
+            );
+
+            if (scale === 'logarithmic') {
+                var maxFreq = Math.max(
+                    20.0,
+                    Math.min(
+                        20000.0,
+                        this.sampleRate * 0.5
+                    )
+                );
+
+                var normalized =
+                    Math.log10(safeFreq / 20.0)
+                    / Math.log10(maxFreq / 20.0);
+
+                return Math.max(
+                    0.0,
+                    Math.min(
+                        bins - 1,
+                        normalized * (bins - 1)
+                    )
+                );
+            }
+
+            return this.frequencyToBin(
+                safeFreq,
+                bins
+            );
+        }
 
     getEventPosition(event) {
         var rect =
@@ -396,6 +591,28 @@
         this.targetCurveDirty = true;
 
         if (this.gradientManager) {
+            for (let g = 0; g < 4; ++g) {
+                if (syncSerial !== this.parameterSyncSerial) return;
+                let p = 'GRADIENT_' + g;
+                await get(p + '_ENABLE', 0);
+                await get(p + '_CENTER_FREQ', 0.5);
+                await get(p + '_CENTER_GAIN', 0.5);
+                await get(p + '_BANDWIDTH', 0.5);
+                await get(p + '_AMOUNT', 0.5);
+                await get(p + '_UP_MAX', 0.5);
+                await get(p + '_DOWN_MAX', 0.5);
+                await get(p + '_SPEED', 0.5);
+                await get(p + '_UP_SMOOTH', 0.5);
+                await get(p + '_DOWN_SMOOTH', 0.5);
+                await get(p + '_UP_SEL', 0.5);
+                await get(p + '_DOWN_SEL', 0.5);
+                await get(p + '_ATTACK', 0.5);
+                await get(p + '_RELEASE', 0.5);
+                await get(p + '_KNEE', 0.5);
+                await get(p + '_AUTO_SPEED', 1);
+            }
+            if (syncSerial !== this.parameterSyncSerial) return;
+
             this.gradientManager.syncFromJuce(JuceBridge);
         }
     }
@@ -493,9 +710,22 @@
         }
 
         setViewRange(depthDb) {
-            this.baseViewDepth = depthDb;
-            this.maxDb = 12.0;
-            this.minDb = this.maxDb - this.baseViewDepth;
+            /*
+                Intentionally fixed.
+
+                Kept as a harmless compatibility method because
+                app.js or old preset/UI code may still call it.
+                No caller is allowed to change the display range.
+            */
+            this.displayMaxDb   = 12.0;
+            this.displayMinDb   = -96.0;
+            this.displayRangeDb = 108.0;
+
+            this.maxDb = this.displayMaxDb;
+            this.minDb = this.displayMinDb;
+            this.baseViewDepth = this.displayRangeDb;
+
+            this.targetCurveDirty = true;
         }
 
         freqToX(freq) {
@@ -518,14 +748,22 @@
         }
 
         gainToY(dB) {
-            var norm =
-                (dB - this.minDb)
-                / (this.maxDb - this.minDb);
+            var db = Number(dB);
 
-            norm = Math.min(
-                1.0,
-                Math.max(0.0, norm)
+            if (!Number.isFinite(db))
+                db = this.displayMinDb;
+
+            db = Math.max(
+                this.displayMinDb,
+                Math.min(
+                    this.displayMaxDb,
+                    db
+                )
             );
+
+            var normalized =
+                (db - this.displayMinDb)
+                / this.displayRangeDb;
 
             var topMargin =
                 this.height * 0.08;
@@ -534,7 +772,7 @@
                 this.height * 0.92;
 
             return bottomMargin
-                - norm
+                - normalized
                 * (bottomMargin - topMargin);
         }
 
@@ -552,24 +790,27 @@
 
             safeY = Math.max(
                 topMargin,
-                Math.min(bottomMargin, safeY)
+                Math.min(
+                    bottomMargin,
+                    safeY
+                )
             );
 
-            var norm =
+            var normalized =
                 (bottomMargin - safeY)
                 / Math.max(
                     1.0,
                     bottomMargin - topMargin
                 );
 
-            norm = Math.max(
+            normalized = Math.max(
                 0.0,
-                Math.min(1.0, norm)
+                Math.min(1.0, normalized)
             );
 
-            return this.minDb
-                + norm
-                * (this.maxDb - this.minDb);
+            return this.displayMinDb
+                + normalized
+                * this.displayRangeDb;
         }
 
         // =================================================================
@@ -665,53 +906,229 @@
                 return this.globalThresh;
             }
 
-            var eqDb = 0.0;
+            /*
+                GLOBAL_THRESH is the absolute base target level.
+
+                It shifts the complete target system:
+                - yellow target curve;
+                - EQ nodes;
+                - gradient points;
+                - target tooltip;
+                - compression target zones.
+
+                It does NOT shift spectrum/analyser data.
+            */
+            var result =
+                this.globalThresh
+                + this.getEQCurveDb(freqNum)
+                + this.getGradientOffsetDb(freqNum);
+
+            if (!Number.isFinite(result))
+                return this.globalThresh;
+
+            return Math.max(
+                -96.0,
+                Math.min(12.0, result)
+            );
+        }
+
+        /*
+            Single authoritative UI geometry.
+
+            Every visual target-related object must use this:
+            - yellow target curve;
+            - EQ node position;
+            - gradient point position;
+            - node hit testing;
+            - tooltips;
+            - drag coordinate conversion.
+
+            Do NOT use effectiveTargetData here.
+            That is runtime DSP telemetry, not UI geometry.
+        */
+        getUiTargetDbAtFreq(freq) {
+            return this.getTargetCurveDb(freq);
+        }
+
+        /*
+            Compatibility alias for older methods in this class.
+        */
+        getTotalTargetDbAtFreq(freq) {
+            return this.getUiTargetDbAtFreq(freq);
+        }
+
+        /*
+            Calculate the absolute target dB at freq with a
+            specific EQ band excluded from the sum.
+
+            Used during drag so the dragged band's local gain
+            can be solved from:
+                bandGain
+                =
+                desiredAbsoluteTargetDb
+                -
+                allOtherContributions(freq)
+        */
+        getUiTargetDbWithoutEqBand(
+            frequencyHz,
+            excludedBandIndex
+        ) {
+            var freq = Math.max(
+                20.0,
+                Number(frequencyHz) || 20.0
+            );
+
+            var result =
+                (Number(this.globalThresh) || 0.0)
+                + this.getGradientOffsetDb(freq);
 
             for (var i = 0;
                  i < this.eqBands.length;
                  ++i) {
-                var b = this.eqBands[i];
-
-                if (!b.enabled ||
-                    Math.abs(b.gain) < 0.05) {
+                if (i === excludedBandIndex)
                     continue;
-                }
 
-                var magnitudeSq =
-                    this.getBiquadMagSq(
-                        freqNum,
-                        b.freq,
-                        b.q,
-                        b.gain
-                    );
-
-                var bandDb =
-                    10.0 * Math.log10(
-                        Math.max(
-                            1.0e-12,
-                            magnitudeSq
-                        )
-                    );
-
-                if (Number.isFinite(bandDb)) {
-                    eqDb += Math.max(
-                        -72.0,
-                        Math.min(72.0, bandDb)
-                    );
-                }
+                result += this.getSingleEqBandDb(
+                    freq,
+                    this.eqBands[i]
+                );
             }
 
-            eqDb = Math.max(
-                -120.0,
-                Math.min(120.0, eqDb)
+            return result;
+        }
+
+        /*
+            Absolute target dB at freq with a specific gradient
+            excluded from the calculation.
+
+            Used during gradient drag so the dragged gradient's
+            local gain can be solved from:
+                gradientGain
+                =
+                desiredAbsoluteTargetDb
+                -
+                allOtherContributions(freq)
+        */
+        getUiTargetDbWithoutGradient(
+            frequencyHz,
+            excludedId
+        ) {
+            var freq = Math.max(
+                20.0,
+                Number(frequencyHz) || 20.0
             );
 
-            var gradientOffset = 0.0;
+            var result =
+                (Number(this.globalThresh) || 0.0)
+                + this.getEQCurveDb(freq)
+                + this.getGradientOffsetDb(
+                    freq,
+                    excludedId
+                );
+
+            return result;
+        }
+
+        /*
+            EQ bell contribution for a single band at a given freq.
+
+            Uses the same getBiquadMagSq / log-magnitude conversion
+            that getTargetCurveDb() uses internally, so both produce
+            identical results.
+        */
+        getSingleEqBandDb(freq, band) {
+            if (!band ||
+                !band.enabled ||
+                Math.abs(band.gain) < 0.05) {
+                return 0.0;
+            }
+
+            var safeFreq = Math.max(
+                20.0,
+                Number(freq) || 20.0
+            );
+
+            var bandFreq = Math.max(
+                20.0,
+                Number(band.freq) || 1000.0
+            );
+
+            var q = Math.max(
+                0.1,
+                Number(band.q) || 1.0
+            );
+
+            var gain = Number(band.gain) || 0.0;
+
+            var magnitudeSq =
+                this.getBiquadMagSq(
+                    safeFreq,
+                    bandFreq,
+                    q,
+                    gain
+                );
+
+            var bandDb =
+                10.0 * Math.log10(
+                    Math.max(
+                        1.0e-12,
+                        magnitudeSq
+                    )
+                );
+
+            if (!Number.isFinite(bandDb))
+                return 0.0;
+
+            return Math.max(
+                -72.0,
+                Math.min(72.0, bandDb)
+            );
+        }
+
+        /*
+            Refactored EQ curve that uses getSingleEqBandDb.
+        */
+        getEQCurveDb(freq) {
+            var total = 0.0;
+
+            for (var i = 0;
+                 i < this.eqBands.length;
+                 ++i) {
+                total += this.getSingleEqBandDb(
+                    freq,
+                    this.eqBands[i]
+                );
+            }
+
+            return Math.max(
+                -120.0,
+                Math.min(120.0, total)
+            );
+        }
+
+        /*
+            Gradient contribution at a given frequency.
+        */
+        getGradientOffsetDb(freq, excludedId) {
+            var freqNum =
+                Math.max(
+                    20.0,
+                    Number(freq) || 20.0
+                );
+
+            var exId =
+                (excludedId === undefined
+                    || excludedId === null)
+                    ? -1
+                    : Number(excludedId);
+
+            var offset = 0.0;
 
             if (this.gradientManager) {
                 this.gradientManager.points.forEach(
                     function (gp) {
-                        if (!gp.active)
+                        if (!gp.active
+                            || gp.id === exId)
                             return;
 
                         var centerFreq =
@@ -745,7 +1162,7 @@
                                     * Math.PI
                                 );
 
-                            gradientOffset +=
+                            offset +=
                                 Math.max(
                                     -60.0,
                                     Math.min(
@@ -760,22 +1177,33 @@
                 );
             }
 
-            var result =
-                eqDb
-                + this.globalThresh
-                + gradientOffset;
-
-            if (!Number.isFinite(result))
-                return this.globalThresh;
-
-            return Math.max(
-                -120.0,
-                Math.min(120.0, result)
-            );
+            return offset;
         }
 
-        getTotalTargetDbAtFreq(freq) {
-            return this.getTargetCurveDb(freq);
+        /*
+            Unified EQ node screen position.
+
+            Used by drawEQNodes(), mousedown, mousemove hover,
+            and dblclick to guarantee identical coordinates.
+        */
+        getEqNodeScreenPosition(bandIndex) {
+            var band =
+                this.eqBands[bandIndex];
+
+            if (!band || !band.enabled)
+                return null;
+
+            return {
+                x: this.freqToX(
+                    band.freq
+                ),
+
+                y: this.gainToY(
+                    this.getUiTargetDbAtFreq(
+                        band.freq
+                    )
+                )
+            };
         }
 
         buildTargetCurveCache() {
@@ -832,22 +1260,64 @@
                 ctx.fillText(label, x, this.height - 8);
             }
 
-            var dbRange  = this.maxDb - this.minDb;
-            var gridStep = dbRange <= 24 ? 6 : 12;
+            /*
+                Fixed 108 dB display grid:
+
+                +12
+                  0
+                -12
+                -24
+                -36
+                -48
+                -60
+                -72
+                -84
+                -96
+            */
+            var gridValues = [
+                 12,
+                  0,
+                -12,
+                -24,
+                -36,
+                -48,
+                -60,
+                -72,
+                -84,
+                -96
+            ];
+
             ctx.textAlign = 'left';
 
-            for (var db = Math.ceil(this.minDb / gridStep) * gridStep; db <= this.maxDb; db += gridStep) {
-                var y     = Math.round(this.gainToY(db));
-                var isZero = Math.abs(db) < 0.1;
+            for (var di = 0;
+                 di < gridValues.length;
+                 ++di) {
+                var db = gridValues[di];
+                var y = Math.round(
+                    this.gainToY(db)
+                );
 
-                ctx.strokeStyle = isZero ? 'rgba(212, 164, 70, 0.25)' : this.colors.grid;
+                var isZero =
+                    Math.abs(db) < 0.1;
+
+                ctx.strokeStyle = isZero
+                    ? 'rgba(212, 164, 70, 0.30)'
+                    : this.colors.grid;
+
                 ctx.beginPath();
                 ctx.moveTo(0, y);
                 ctx.lineTo(this.width, y);
                 ctx.stroke();
 
-                var dbLabel = (db > 0 ? '+' : '') + Math.round(db);
-                ctx.fillText(dbLabel, 8, y - 4);
+                var dbLabel =
+                    (db > 0 ? '+' : '')
+                    + db;
+
+                ctx.fillText(
+                    dbLabel,
+                    8,
+                    y - 4
+                );
             }
         }
 
@@ -906,6 +1376,130 @@
                 b = parseInt(hex.slice(5, 7), 16);
             }
             return 'rgba(' + r + ',' + g + ',' + b + ',' + (alpha !== undefined ? alpha : 1) + ')';
+        }
+
+        drawDetectorFog() {
+            var ctx = this.ctx;
+
+            if (!this.hasNativeAnalysis ||
+                !this.detectorData ||
+                this.detectorData.length === 0) {
+                return;
+            }
+
+            ctx.save();
+
+            /*
+                Fill below the exact DSP detector curve.
+            */
+            ctx.beginPath();
+
+            var first = true;
+
+            for (var x = 0;
+                 x <= this.width;
+                 x += 2) {
+                var frequency =
+                    this.xToFreq(x);
+
+                var detectorDb =
+                    this.getArrayValueAtFrequency(
+                        frequency,
+                        this.detectorData,
+                        -120.0
+                    );
+
+                var y =
+                    this.gainToY(detectorDb);
+
+                if (first) {
+                    ctx.moveTo(x, y);
+                    first = false;
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+
+            ctx.lineTo(
+                this.width,
+                this.height
+            );
+
+            ctx.lineTo(0, this.height);
+            ctx.closePath();
+
+            var fill =
+                ctx.createLinearGradient(
+                    0,
+                    0,
+                    0,
+                    this.height
+                );
+
+            fill.addColorStop(
+                0,
+                'rgba(244, 196, 114, 0.34)'
+            );
+
+            fill.addColorStop(
+                1,
+                'rgba(244, 196, 114, 0.01)'
+            );
+
+            ctx.fillStyle = fill;
+            ctx.fill();
+
+            /*
+                Exact detector contour.
+            */
+            ctx.beginPath();
+            first = true;
+
+            for (var dx = 0;
+                 dx <= this.width;
+                 dx += 2) {
+                var detectorFreq =
+                    this.xToFreq(dx);
+
+                var detectorValue =
+                    this.getArrayValueAtFrequency(
+                        detectorFreq,
+                        this.detectorData,
+                        -120.0
+                    );
+
+                var detectorY =
+                    this.gainToY(
+                        detectorValue
+                    );
+
+                if (first) {
+                    ctx.moveTo(
+                        dx,
+                        detectorY
+                    );
+
+                    first = false;
+                } else {
+                    ctx.lineTo(
+                        dx,
+                        detectorY
+                    );
+                }
+            }
+
+            ctx.strokeStyle =
+                this.colors.phosphor;
+
+            ctx.lineWidth = 1.8;
+            ctx.shadowColor =
+                this.colors.phosphor;
+
+            ctx.shadowBlur = 8;
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+            ctx.restore();
         }
 
         drawSpectrumFog() {
@@ -971,57 +1565,340 @@
             }
         }
 
+        drawCompressionDeltaPolygon(isDownward) {
+            var ctx = this.ctx;
+            var step = 2;
+            var segments = [];
+            var current = null;
+
+            for (var x = 0;
+                 x <= this.width;
+                 x += step) {
+                var frequency =
+                    this.xToFreq(x);
+
+                var detectorDb =
+                    this.getArrayValueAtFrequency(
+                        frequency,
+                        this.detectorData,
+                        -120.0
+                    );
+
+                var deltaDb =
+                    this.getInterpolatedDelta(
+                        frequency
+                    );
+
+                if (!Number.isFinite(deltaDb))
+                    deltaDb = 0.0;
+
+                var isActive = isDownward
+                    ? deltaDb < -0.05
+                    : deltaDb > 0.05;
+
+                if (!isActive) {
+                    if (current && current.length > 1)
+                        segments.push(current);
+
+                    current = null;
+                    continue;
+                }
+
+                if (!current)
+                    current = [];
+
+                current.push({
+                    x: x,
+                    detectorDb: detectorDb,
+                    processedDb: detectorDb + deltaDb
+                });
+            }
+
+            if (current && current.length > 1)
+                segments.push(current);
+
+            for (var s = 0;
+                 s < segments.length;
+                 ++s) {
+                var segment = segments[s];
+
+                ctx.save();
+                ctx.beginPath();
+
+                /*
+                    Detector side of polygon.
+                */
+                for (var i = 0;
+                     i < segment.length;
+                     ++i) {
+                    var topPoint = segment[i];
+                    var detectorY =
+                        this.gainToY(
+                            topPoint.detectorDb
+                        );
+
+                    if (i === 0) {
+                        ctx.moveTo(topPoint.x, detectorY);
+                    } else {
+                        ctx.lineTo(topPoint.x, detectorY);
+                    }
+                }
+
+                /*
+                    Processed side, traversed backwards
+                    to close the polygon.
+                */
+                for (var j = segment.length - 1;
+                     j >= 0;
+                     --j) {
+                    var bottomPoint = segment[j];
+                    var processedY =
+                        this.gainToY(
+                            bottomPoint.processedDb
+                        );
+
+                    ctx.lineTo(
+                        bottomPoint.x,
+                        processedY
+                    );
+                }
+
+                ctx.closePath();
+
+                ctx.fillStyle = isDownward
+                    ? this.colors.downwardFill
+                    : this.colors.upwardFill;
+
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
         drawCompressionDeltasAndTarget() {
             var ctx = this.ctx;
 
-            if (this.targetCurveDirty || this.targetDbPerPixel.length !== this.width + 1) {
+            if (this.targetCurveDirty ||
+                this.targetDbPerPixel.length !==
+                    this.width + 1) {
                 this.buildTargetCurveCache();
                 this.targetCurveDirty = false;
             }
 
-            var step = 4;
+            var useNativeDetector =
+                this.displayMode === 'detector' &&
+                this.hasNativeAnalysis &&
+                this.detectorData &&
+                this.detectorData.length > 0;
 
-            for (var x = 0; x <= this.width; x += step) {
-                var targetDb = this.targetDbPerPixel[x];
-                var yTarget  = this.gainToY(targetDb);
+            var useNativeTarget =
+                useNativeDetector &&
+                this.effectiveTargetData &&
+                this.effectiveTargetData.length > 0;
 
-                var delta = 0;
-                var freq = this.xToFreq(x);
-                delta = this.getInterpolatedDelta(freq);
+            /*
+                DSP-Authoritative Compression Areas.
+                The fill between the detector curve and the
+                processed (post-dsp) detector curve represents
+                the actual gain reduction applied by DSP.
 
-                var yComp = this.gainToY(targetDb + delta);
+                This uses deltaData (compressionDeltaData from
+                the engine), which already includes DN MAX
+                clamping. When DN MAX = 0, no downward delta
+                exists and the area disappears.
 
-                if (delta < -0.1) {
-                    ctx.fillStyle = this.colors.downwardFill;
-                    ctx.fillRect(x, yTarget, step, yComp - yTarget);
-                } else if (delta > 0.1) {
-                    ctx.fillStyle = this.colors.upwardFill;
-                    ctx.fillRect(x, yComp, step, yTarget - yComp);
+                The effectiveTarget line is drawn separately
+                as a contour — it does NOT drive fill areas.
+            */
+            if (useNativeDetector) {
+                /*
+                    Both polygons use the same frequency mapping:
+                    x -> frequency -> detector/delta interpolation.
+
+                    No independent vertical strips, therefore no
+                    visual horizontal band displacement.
+                */
+                this.drawCompressionDeltaPolygon(true);
+                this.drawCompressionDeltaPolygon(false);
+
+                /*
+                    Processed detector contour.
+                */
+                ctx.beginPath();
+
+                var processedFirst = true;
+
+                for (var px = 0;
+                     px <= this.width;
+                     px += 2) {
+                    var processedFreq =
+                        this.xToFreq(px);
+
+                    var baseDetector =
+                        this.getArrayValueAtFrequency(
+                            processedFreq,
+                            this.detectorData,
+                            -120.0
+                        );
+
+                    var gainDelta =
+                        this.getInterpolatedDelta(
+                            processedFreq
+                        );
+
+                    if (!Number.isFinite(gainDelta))
+                        gainDelta = 0.0;
+
+                    var processedDb =
+                        baseDetector + gainDelta;
+
+                    var py =
+                        this.gainToY(processedDb);
+
+                    if (processedFirst) {
+                        ctx.moveTo(px, py);
+                        processedFirst = false;
+                    } else {
+                        ctx.lineTo(px, py);
+                    }
+                }
+
+                ctx.strokeStyle =
+                    'rgba(255, 105, 90, 0.90)';
+
+                ctx.lineWidth = 1.4;
+                ctx.stroke();
+            }
+
+            /*
+                3. Draw the exact effective DSP target.
+            */
+            ctx.beginPath();
+
+            var targetFirst = true;
+
+            for (var tx = 0;
+                 tx <= this.width;
+                 tx += 2) {
+                var targetFreq =
+                    this.xToFreq(tx);
+
+                /*
+                    The main yellow target curve is UI geometry,
+                    not a resampled DSP telemetry buffer.
+
+                    This guarantees that nodes and the line always
+                    occupy exactly the same coordinate system.
+                */
+                var displayTargetDb =
+                    this.getUiTargetDbAtFreq(
+                        targetFreq
+                    );
+
+                var ty =
+                    this.gainToY(
+                        displayTargetDb
+                    );
+
+                if (targetFirst) {
+                    ctx.moveTo(tx, ty);
+                    targetFirst = false;
+                } else {
+                    ctx.lineTo(tx, ty);
                 }
             }
 
-            // Target curve line
-            ctx.beginPath();
-            for (var tx = 0; tx <= this.width; tx += 2) {
-                var tDb = this.targetDbPerPixel[tx];
-                var ty  = this.gainToY(tDb);
-                if (tx === 0) ctx.moveTo(tx, ty);
-                else ctx.lineTo(tx, ty);
-            }
+            ctx.shadowBlur = 10;
+            ctx.shadowColor =
+                this.colors.phosphor;
 
-            ctx.shadowBlur  = 10;
-            ctx.shadowColor = this.colors.phosphor;
-            ctx.strokeStyle = this.colors.phosphor;
-            ctx.lineWidth   = 2.2;
+            ctx.strokeStyle =
+                this.colors.phosphor;
+
+            ctx.lineWidth = 2.2;
             ctx.stroke();
-            ctx.shadowBlur  = 0;
+            ctx.shadowBlur = 0;
 
-            // Average gain line (port of C++: bins 10..200)
-            var avgGain = 0;
+            /*
+                DSP TARGET — prominent technical headline.
+
+                Use the same UI target geometry as the yellow
+                target curve and EQ/gradient points.
+            */
+            var labelTargetDb =
+                this.getUiTargetDbAtFreq(
+                    1000.0
+                );
+
+            var labelText =
+                useNativeTarget
+                    ? 'DSP TARGET'
+                    : 'TARGET';
+
+            var labelY =
+                this.gainToY(
+                    labelTargetDb
+                )
+                - 12;
+
+            ctx.save();
+
+            ctx.font =
+                '16px "GOST Type B", "Russo One", "Courier New", monospace';
+
+            ctx.textAlign =
+                'left';
+
+            ctx.textBaseline =
+                'middle';
+
+            ctx.lineWidth =
+                2.0;
+
+            ctx.strokeStyle =
+                'rgba(8, 7, 5, 0.94)';
+
+            ctx.strokeText(
+                labelText,
+                14,
+                labelY
+            );
+
+            ctx.fillStyle =
+                '#f6cd67';
+
+            ctx.shadowColor =
+                'rgba(255, 185, 55, 0.78)';
+
+            ctx.shadowBlur =
+                7;
+
+            ctx.fillText(
+                labelText,
+                14,
+                labelY
+            );
+
+            ctx.restore();
+
+            /*
+                Average applied gain.
+            */
+            var avgGain = 0.0;
             var validBins = 0;
-            for (var abi = 10; abi < Math.min(200, this.numBins); ++abi) {
-                var deltaDb = this.deltaData[abi];
-                if (Math.abs(deltaDb) < 20) {
+
+            for (var abi = 10;
+                 abi < Math.min(
+                     200,
+                     this.deltaData.length
+                 );
+                 ++abi) {
+                var deltaDb =
+                    Number(
+                        this.deltaData[abi]
+                    );
+
+                if (Number.isFinite(deltaDb) &&
+                    Math.abs(deltaDb) < 48.0) {
                     avgGain += deltaDb;
                     ++validBins;
                 }
@@ -1029,22 +1906,22 @@
 
             if (validBins > 0) {
                 avgGain /= validBins;
-                var avgY = this.gainToY(avgGain);
 
-                ctx.strokeStyle = 'rgba(100, 200, 255, 0.5)';
-                ctx.setLineDash([6, 4]);
-                ctx.beginPath();
-                for (var ax = 0; ax < this.width; ax += 8) {
-                    ctx.moveTo(ax, avgY);
-                    ctx.lineTo(ax + 4, avgY);
-                }
-                ctx.stroke();
-                ctx.setLineDash([]);
+                ctx.fillStyle =
+                    'rgba(255, 255, 255, 0.90)';
 
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                ctx.font      = 'bold 10px "GOST Type B", monospace';
+                ctx.font =
+                    'bold 10px "GOST Type B", monospace';
+
                 ctx.textAlign = 'left';
-                ctx.fillText('AVG: ' + avgGain.toFixed(1) + ' dB', 12, avgY - 8);
+
+                ctx.fillText(
+                    'GAIN: '
+                        + avgGain.toFixed(1)
+                        + ' dB',
+                    12,
+                    18
+                );
             }
         }
 
@@ -1063,8 +1940,10 @@
                 var b = this.eqBands[i];
                 if (!b.enabled && this.draggingNode !== i) continue;
 
-                var nodeDb = this.getTotalTargetDbAtFreq(b.freq);
-                var pos    = { x: this.freqToX(b.freq), y: this.gainToY(nodeDb) };
+                var pos =
+                    this.getEqNodeScreenPosition(i);
+
+                if (!pos) continue;
 
                 var isHovered = (this.hoveredNode === i || this.draggingNode === i);
                 var qRadius   = Math.max(10, 35.0 / Math.max(0.1, b.q));
@@ -1083,21 +1962,93 @@
                     ctx.fill();
                 }
 
-                // Center glowing dot
-                ctx.fillStyle    = this.colors.phosphor;
-                ctx.shadowBlur   = isHovered ? 12 : 6;
-                ctx.shadowColor  = this.colors.phosphor;
-                ctx.beginPath();
-                ctx.arc(pos.x, pos.y, isHovered ? 6 : 4.5, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.shadowBlur   = 0;
+                /*
+                    Larger, high-contrast EQ band marker.
 
-                // Band number
-                ctx.fillStyle    = '#0a0908';
-                ctx.font         = 'bold 9px monospace';
-                ctx.textAlign    = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText((i + 1).toString(), pos.x, pos.y);
+                    The number is deliberately readable at the
+                    fixed 990 x 594 editor scale.
+                */
+                var nodeRadius =
+                    isHovered ? 11.0 : 9.0;
+
+                ctx.fillStyle =
+                    this.colors.phosphor;
+
+                ctx.shadowBlur =
+                    isHovered ? 16 : 9;
+
+                ctx.shadowColor =
+                    this.colors.phosphor;
+
+                ctx.beginPath();
+                ctx.arc(
+                    pos.x,
+                    pos.y,
+                    nodeRadius,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
+
+                ctx.shadowBlur = 0;
+
+                /*
+                    Dark inner disc makes the enlarged number
+                    readable over the target curve and FFT fog.
+                */
+                ctx.fillStyle =
+                    'rgba(10, 9, 8, 0.94)';
+
+                ctx.beginPath();
+                ctx.arc(
+                    pos.x,
+                    pos.y,
+                    nodeRadius - 2.0,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
+
+                ctx.strokeStyle =
+                    isHovered
+                        ? '#fff0c4'
+                        : 'rgba(255, 231, 174, 0.88)';
+
+                ctx.lineWidth =
+                    isHovered ? 1.4 : 1.0;
+
+                ctx.beginPath();
+                ctx.arc(
+                    pos.x,
+                    pos.y,
+                    nodeRadius,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.stroke();
+
+                /*
+                    Large band number.
+                */
+                ctx.fillStyle =
+                    '#fff4d5';
+
+                ctx.font =
+                    'bold '
+                    + (isHovered ? '13px' : '12px')
+                    + ' "GOST Type B", "Courier New", monospace';
+
+                ctx.textAlign =
+                    'center';
+
+                ctx.textBaseline =
+                    'middle';
+
+                ctx.fillText(
+                    (i + 1).toString(),
+                    pos.x,
+                    pos.y + 0.5
+                );
             }
         }
 
@@ -1227,15 +2178,35 @@
         }
 
         render() {
-            this.ctx.clearRect(0, 0, this.width, this.height);
+            this.ctx.clearRect(
+                0,
+                0,
+                this.width,
+                this.height
+            );
+
             this.drawBackground();
             this.drawGrid();
             this.drawGradientFills();
-            this.drawSpectrumFog();
+
+            if (this.displayMode === 'detector') {
+                this.drawDetectorFog();
+            } else {
+                this.drawSpectrumFog();
+            }
+
             this.drawCompressionDeltasAndTarget();
             this.drawEQNodes();
             this.drawGradientMarkers();
-            this.drawThreshold();
+
+            /*
+                In detector mode the exact per-bin threshold
+                is already drawn. Drawing a separate global
+                threshold line would be misleading.
+            */
+            if (this.displayMode !== 'detector')
+                this.drawThreshold();
+
             this.drawTooltip();
             this.drawScanlines();
         }
@@ -1275,8 +2246,203 @@
         }
 
         // =================================================================
+        // Local Δ Audition Focus
+        // =================================================================
+
+        notifyAuditionFocus(
+            frequencyHz,
+            widthOctaves,
+            sourceType,
+            sourceId
+        ) {
+            if (typeof this.onAuditionFocusChanged !== 'function')
+                return;
+
+            var freq = Number(frequencyHz);
+            var width = Number(widthOctaves);
+
+            if (!Number.isFinite(freq) ||
+                !Number.isFinite(width) ||
+                freq <= 0.0 ||
+                width <= 0.0) {
+                this.clearAuditionFocus();
+                return;
+            }
+
+            freq = Math.max(
+                20.0,
+                Math.min(20000.0, freq)
+            );
+
+            width = Math.max(
+                0.10,
+                Math.min(4.0, width)
+            );
+
+            var type =
+                String(sourceType || 'none');
+
+            var id =
+                Number.isFinite(Number(sourceId))
+                    ? Number(sourceId)
+                    : -1;
+
+            /*
+                Avoid flooding JS -> C++ calls while the mouse is
+                stationary or the visual renderer is repainting.
+            */
+            var frequencyChanged =
+                Math.abs(
+                    freq - this.lastAuditionFrequencyHz
+                ) > 0.5;
+
+            var widthChanged =
+                Math.abs(
+                    width - this.lastAuditionWidthOctaves
+                ) > 0.01;
+
+            var sourceChanged =
+                type !== this.lastAuditionSource
+                || id !== this.lastAuditionSourceId;
+
+            if (!frequencyChanged &&
+                !widthChanged &&
+                !sourceChanged) {
+                return;
+            }
+
+            this.lastAuditionFrequencyHz =
+                freq;
+
+            this.lastAuditionWidthOctaves =
+                width;
+
+            this.lastAuditionSource =
+                type;
+
+            this.lastAuditionSourceId =
+                id;
+
+            this.onAuditionFocusChanged({
+                active: true,
+                frequencyHz: freq,
+                widthOctaves: width,
+                sourceType: type,
+                sourceId: id
+            });
+        }
+
+        clearAuditionFocus() {
+            if (this.lastAuditionSource === 'none')
+                return;
+
+            this.lastAuditionFrequencyHz = -1.0;
+            this.lastAuditionWidthOctaves = -1.0;
+            this.lastAuditionSource = 'none';
+            this.lastAuditionSourceId = -1;
+
+            if (typeof this.onAuditionFocusChanged === 'function') {
+                this.onAuditionFocusChanged({
+                    active: false,
+                    frequencyHz: 1000.0,
+                    widthOctaves: 1.0,
+                    sourceType: 'none',
+                    sourceId: -1
+                });
+            }
+        }
+
+        getEQAuditionWidthOctaves(q) {
+            /*
+                Approximation intended for listening ergonomics,
+                not for drawing the exact biquad bandwidth.
+
+                Higher Q = narrower audition area.
+            */
+            var safeQ = Math.max(
+                0.1,
+                Math.min(
+                    10.0,
+                    Number(q) || 1.0
+                )
+            );
+
+            return Math.max(
+                0.15,
+                Math.min(
+                    3.0,
+                    1.25 / safeQ
+                )
+            );
+        }
+
+        // =================================================================
         // Event handling (port of EQGraphLED mouse handlers)
         // =================================================================
+
+        installContextMenuGuard() {
+            const canvas =
+                this.canvas;
+
+            if (!canvas)
+                return;
+
+            this.boundContextMenuGuard =
+                function (event) {
+                    const target =
+                        event.target;
+
+                    const isCanvas =
+                        target === canvas ||
+                        (target
+                            && typeof target
+                                .closest === 'function'
+                            && target.closest(
+                                '#main-screen'
+                            ));
+
+                    if (!isCanvas)
+                        return;
+
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    if (typeof event
+                        .stopImmediatePropagation
+                        === 'function') {
+                        event.stopImmediatePropagation();
+                    }
+
+                    return false;
+                };
+
+            document.addEventListener(
+                'contextmenu',
+                this.boundContextMenuGuard,
+                true
+            );
+
+            window.addEventListener(
+                'contextmenu',
+                this.boundContextMenuGuard,
+                true
+            );
+        }
+
+        canProcessRightClick() {
+            const now =
+                performance.now();
+
+            if (now - this.lastRightClickTime
+                < 150) {
+                return false;
+            }
+
+            this.lastRightClickTime =
+                now;
+
+            return true;
+        }
 
         initEvents() {
             var self = this;
@@ -1320,21 +2486,74 @@
                 return pointId >= 0;
             }
 
+            this.canvas.addEventListener(
+                'pointerdown',
+                function (event) {
+                    if (event.button !== 2)
+                        return;
+
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    if (typeof event
+                        .stopImmediatePropagation
+                        === 'function') {
+                        event.stopImmediatePropagation();
+                    }
+
+                    if (!self.canProcessRightClick())
+                        return;
+
+                    if (self.canvas
+                        .setPointerCapture &&
+                        event.pointerId
+                            !== undefined) {
+                        try {
+                            self.canvas
+                                .setPointerCapture(
+                                    event.pointerId
+                                );
+                        } catch (error) {}
+                    }
+
+                    const created =
+                        addGradientFromEvent(
+                            event
+                        );
+
+                    console.log(
+                        '[SpectrumScreen] Right ' +
+                        'pointer:',
+                        'x=', event.clientX,
+                        'y=', event.clientY,
+                        'created=', created
+                    );
+                },
+                {
+                    capture: true,
+                    passive: false
+                }
+            );
+
             this.canvas.addEventListener('mousedown', function (e) {
+                if (e.button === 2) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+
                 var pos  = self.getEventPosition(e);
 
                 if (!pos.inside)
                     return;
 
                 /*
-                    Reliable gradient creation:
-
-                    Shift + left click — primary method.
-                    Right click — additional fallback.
+                    Shift + left click — gradient
+                    creation method.
                 */
                 var wantsGradient =
-                    (e.button === 0 && e.shiftKey) ||
-                    e.button === 2;
+                    e.button === 0 &&
+                    e.shiftKey;
 
                 if (wantsGradient) {
                     e.preventDefault();
@@ -1423,19 +2642,17 @@
                     if (!band.enabled)
                         continue;
 
-                    var nodeX =
-                        self.freqToX(band.freq);
-
-                    var nodeY =
-                        self.gainToY(
-                            self.getTotalTargetDbAtFreq(
-                                band.freq
-                            )
+                    var nodePos =
+                        self.getEqNodeScreenPosition(
+                            ei
                         );
 
+                    if (!nodePos)
+                        continue;
+
                     if (Math.hypot(
-                            pos.x - nodeX,
-                            pos.y - nodeY) < 18.0) {
+                            pos.x - nodePos.x,
+                            pos.y - nodePos.y) < 23.0) {
                         self.draggingNode = ei;
                         self.dragStartFreq =
                             band.freq;
@@ -1520,19 +2737,6 @@
                 );
             });
 
-            self.canvas.addEventListener(
-                'contextmenu',
-                function (e) {
-                    /*
-                        mousedown normally creates the
-                        gradient. This handler primarily
-                        suppresses the browser context menu.
-                    */
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-            );
-
             // Double click to delete
             self.canvas.addEventListener('dblclick', function (e) {
                 var pos  = self.getEventPosition(e);
@@ -1543,9 +2747,9 @@
                 // Delete EQ node
                 for (var di = 0; di < 8; ++di) {
                     if (!self.eqBands[di].enabled) continue;
-                    var dnX = self.freqToX(self.eqBands[di].freq);
-                    var dnY = self.gainToY(self.getTotalTargetDbAtFreq(self.eqBands[di].freq));
-                    if (Math.hypot(pos.x - dnX, pos.y - dnY) < 15.0) {
+                    var dnPos = self.getEqNodeScreenPosition(di);
+                    if (!dnPos) continue;
+                    if (Math.hypot(pos.x - dnPos.x, pos.y - dnPos.y) < 20.0) {
                         self.eqBands[di].enabled = false;
                         self.targetCurveDirty = true;
                         if (JuceBridge && JuceBridge.isJuceAvailable()) {
@@ -1559,9 +2763,13 @@
                 if (self.gradientManager) {
                     for (var gi2 = 0; gi2 < self.gradientManager.points.length; ++gi2) {
                         var gp2 = self.gradientManager.points[gi2];
+
+                        if (!gp2 || !gp2.active)
+                            continue;
+
                         var gpx = self.freqToX(gp2.centerFreqHz);
                         var gpy = self.gainToY(self.getTotalTargetDbAtFreq(gp2.centerFreqHz));
-                            if (Math.hypot(pos.x - gpx, pos.y - gpy) < 15.0) {
+                            if (Math.hypot(pos.x - gpx, pos.y - gpy) < 20.0) {
                                 var deletedGradientId = gp2.id;
 
                                 self.gradientManager.removePoint(
@@ -1618,7 +2826,7 @@
                         var hp  = self.gradientManager.points[hi];
                         var hpx = self.freqToX(hp.centerFreqHz);
                         var hpy = self.gainToY(self.getTotalTargetDbAtFreq(hp.centerFreqHz));
-                        if (Math.hypot(pos.x - hpx, pos.y - hpy) < 15.0) {
+                        if (Math.hypot(pos.x - hpx, pos.y - hpy) < 20.0) {
                             self.hoveredGradientId = hp.id;
                             break;
                         }
@@ -1628,29 +2836,127 @@
                 if (self.hoveredGradientId < 0) {
                     for (var hn = 0; hn < 8; ++hn) {
                         if (!self.eqBands[hn].enabled) continue;
-                        var hnx = self.freqToX(self.eqBands[hn].freq);
-                        var hny = self.gainToY(self.getTotalTargetDbAtFreq(self.eqBands[hn].freq));
-                        if (Math.hypot(pos.x - hnx, pos.y - hny) < 15.0) {
+                        var hPos = self.getEqNodeScreenPosition(hn);
+                        if (!hPos) continue;
+                        if (Math.hypot(pos.x - hPos.x, pos.y - hPos.y) < 20.0) {
                             self.hoveredNode = hn;
                             break;
                         }
                     }
                 }
 
+                /*
+                    Update local Δ audition focus from the exact
+                    visual object currently under the pointer.
+                */
+                if (self.hoveredGradientId >= 0 &&
+                    self.gradientManager) {
+                    var auditionGradient =
+                        self.gradientManager.getPoint(
+                            self.hoveredGradientId
+                        );
+
+                    if (auditionGradient &&
+                        auditionGradient.active) {
+                        self.notifyAuditionFocus(
+                            auditionGradient.centerFreqHz,
+                            auditionGradient.radiusOctaves,
+                            'gradient',
+                            auditionGradient.id
+                        );
+                    }
+                } else if (self.hoveredNode >= 0) {
+                    var auditionBand =
+                        self.eqBands[
+                            self.hoveredNode
+                        ];
+
+                    if (auditionBand &&
+                        auditionBand.enabled) {
+                        self.notifyAuditionFocus(
+                            auditionBand.freq,
+                            self.getEQAuditionWidthOctaves(
+                                auditionBand.q
+                            ),
+                            'eq',
+                            auditionBand.id
+                        );
+                    }
+                } else if (!isDragging) {
+                    self.clearAuditionFocus();
+                }
+
                 // Drag gradient point
                 if (self.draggingGradientId >= 0 && self.gradientManager) {
                     var dgp = self.gradientManager.getPoint(self.draggingGradientId);
                     if (dgp) {
-                        var newFreq = Math.min(20000.0, Math.max(20.0, self.xToFreq(pos.x)));
-                        var newGain = Math.min(60.0, Math.max(-60.0, self.yToGain(pos.y) - self.globalThresh));
+                        var newFreq =
+                            Math.min(
+                                20000.0,
+                                Math.max(
+                                    20.0,
+                                    self.xToFreq(pos.x)
+                                )
+                            );
 
-                        var freqChanged = Math.abs(dgp.centerFreqHz - newFreq) > 0.01;
-                        var gainChanged = Math.abs(dgp.centerGainDb - newGain) > 0.001;
+                        /*
+                            yToGain() returns the absolute target
+                            dB coordinate the gradient point should
+                            occupy. Solve for the local gain:
+                                gradientGain
+                                =
+                                desiredAbsoluteTargetDb
+                                -
+                                allOtherContributions(freq)
+                        */
+                        var desiredAbsoluteTargetDb =
+                            self.yToGain(pos.y);
 
-                        dgp.centerFreqHz = newFreq;
-                        dgp.centerGainDb = newGain;
+                        var targetWithoutThisGradient =
+                            self.getUiTargetDbWithoutGradient(
+                                newFreq,
+                                dgp.id
+                            );
+
+                        var newGain =
+                            desiredAbsoluteTargetDb
+                            - targetWithoutThisGradient;
+
+                        newGain =
+                            Math.max(
+                                -60.0,
+                                Math.min(
+                                    60.0,
+                                    newGain
+                                )
+                            );
+
+                        var freqChanged =
+                            Math.abs(
+                                dgp.centerFreqHz
+                                - newFreq
+                            ) > 0.01;
+
+                        var gainChanged =
+                            Math.abs(
+                                dgp.centerGainDb
+                                - newGain
+                            ) > 0.001;
+
+                        dgp.centerFreqHz =
+                            newFreq;
+
+                        dgp.centerGainDb =
+                            newGain;
 
                         self.targetCurveDirty = true;
+
+                        self.notifyAuditionFocus(
+                            newFreq,
+                            dgp.radiusOctaves,
+                            'gradient',
+                            dgp.id
+                        );
 
                         if (JuceBridge && JuceBridge.isJuceAvailable()) {
                             var prefix = 'GRADIENT_' + dgp.id;
@@ -1676,16 +2982,79 @@
                 // Drag EQ node
                 if (self.draggingNode >= 0) {
                     var db = self.eqBands[self.draggingNode];
-                    var newFreq = Math.min(20000.0, Math.max(20.0, self.xToFreq(pos.x)));
-                    var newGain = Math.min(60.0, Math.max(-60.0, self.yToGain(pos.y) - self.globalThresh));
 
-                    var freqChanged = Math.abs(db.freq - newFreq) > 0.01;
-                    var gainChanged = Math.abs(db.gain - newGain) > 0.001;
+                    var newFreq =
+                        Math.min(
+                            20000.0,
+                            Math.max(
+                                20.0,
+                                self.xToFreq(pos.x)
+                            )
+                        );
 
-                    db.freq = newFreq;
-                    db.gain = newGain;
+                    /*
+                        yToGain() returns the absolute target
+                        dB coordinate the node should occupy.
+                    */
+                    var desiredAbsoluteTargetDb =
+                        self.yToGain(pos.y);
+
+                    /*
+                        Target curve underneath this EQ node
+                        with the node itself excluded.
+
+                        Therefore:
+                            band gain
+                            =
+                            desiredAbsoluteTargetDb
+                            -
+                            allOtherContributions(freq)
+                    */
+                    var targetWithoutThisBand =
+                        self.getUiTargetDbWithoutEqBand(
+                            newFreq,
+                            self.draggingNode
+                        );
+
+                    var newGain =
+                        desiredAbsoluteTargetDb
+                        - targetWithoutThisBand;
+
+                    newGain =
+                        Math.max(
+                            -60.0,
+                            Math.min(
+                                60.0,
+                                newGain
+                            )
+                        );
+
+                    var freqChanged =
+                        Math.abs(
+                            db.freq - newFreq
+                        ) > 0.01;
+
+                    var gainChanged =
+                        Math.abs(
+                            db.gain - newGain
+                        ) > 0.001;
+
+                    db.freq =
+                        newFreq;
+
+                    db.gain =
+                        newGain;
 
                     self.targetCurveDirty = true;
+
+                    self.notifyAuditionFocus(
+                        newFreq,
+                        self.getEQAuditionWidthOctaves(
+                            db.q
+                        ),
+                        'eq',
+                        db.id
+                    );
 
                     if (JuceBridge && JuceBridge.isJuceAvailable()) {
                         var bprefix = 'BAND_' + self.draggingNode;
@@ -1761,24 +3130,17 @@
                 if (!pos.inside)
                     return;
 
-                // Ctrl+Wheel → cycle view range
+                /*
+                    Ctrl + Wheel used to cycle VIEW_RANGE.
+
+                    The renderer now has one calibrated display:
+                    +12 dB ... -96 dB (108 dB total).
+
+                    Consume the gesture so browser zoom is
+                    prevented, but intentionally do not change
+                    display scale or write VIEW_RANGE.
+                */
                 if (e.ctrlKey) {
-                    var depths = [24, 48, 72, 96, 120];
-                    var curIdx  = 0;
-                    var minDiff = 9999;
-                    for (var ci = 0; ci < depths.length; ci++) {
-                        var d = Math.abs(depths[ci] - self.baseViewDepth);
-                        if (d < minDiff) { minDiff = d; curIdx = ci; }
-                    }
-                    var direction = e.deltaY > 0 ? 1 : -1;
-                    var newIdx    = Math.min(depths.length - 1, Math.max(0, curIdx + direction));
-                    if (newIdx !== curIdx) {
-                        self.setViewRange(depths[newIdx]);
-                        if (JuceBridge && JuceBridge.isJuceAvailable()) {
-                            JuceBridge.setParameter('VIEW_RANGE', newIdx / (depths.length - 1));
-                        }
-                        self.zoomIndicatorAlpha = 1.0;
-                    }
                     return;
                 }
 
@@ -1818,21 +3180,57 @@
             });
         }
 
+        getFreeGradientSlot() {
+            if (!this.gradientManager ||
+                !Array.isArray(
+                    this.gradientManager.points
+                )) {
+                return -1;
+            }
+
+            for (let i = 0;
+                 i < this.gradientManager.points.length;
+                 ++i) {
+                const point =
+                    this.gradientManager.points[i];
+
+                if (!point || !point.active)
+                    return i;
+            }
+
+            return -1;
+        }
+
         createGradientAt(freq, gainDb) {
             if (!this.gradientManager)
                 return -1;
 
             /*
-                Maximum: four gradient slots.
+                Count only active points.
+                Inactive points may still occupy
+                array slots — they should be reused.
             */
-            if (this.gradientManager.points.length >= 4)
+            const activeCount =
+                this.gradientManager.points.filter(
+                    function (point) {
+                        return point && point.active;
+                    }
+                ).length;
+
+            if (activeCount >= 4) {
+                console.warn(
+                    '[SpectrumScreen] ' +
+                    'All gradient slots occupied'
+                );
+
                 return -1;
+            }
 
             freq = Math.max(
                 20.0,
                 Math.min(
                     20000.0,
-                    Number(freq) || 20.0
+                    Number(freq) || 1000.0
                 )
             );
 
@@ -1844,17 +3242,37 @@
                 )
             );
 
-            var pointId =
-                this.gradientManager.addPoint(
-                    freq,
-                    gainDb
-                );
+            let pointId = -1;
 
+            try {
+                pointId =
+                    this.gradientManager.addPoint(
+                        freq,
+                        gainDb
+                    );
+            } catch (error) {
+                console.error(
+                    '[SpectrumScreen] ' +
+                    'addPoint failed:',
+                    error
+                );
+            }
+
+            /*
+                If addPoint returned -1 but a free
+                inactive slot exists, activate it
+                directly.
+            */
             if (!Number.isFinite(Number(pointId)) ||
                 Number(pointId) < 0) {
+                pointId =
+                    this.getFreeGradientSlot();
+            }
+
+            if (pointId < 0) {
                 console.warn(
                     '[SpectrumScreen] ' +
-                    'GradientManager.addPoint failed'
+                    'No free gradient slot'
                 );
 
                 return -1;
@@ -1862,15 +3280,28 @@
 
             pointId = Number(pointId);
 
-            var point =
+            let point =
                 this.gradientManager.getPoint(
                     pointId
                 );
 
+            /*
+                Fallback: use array index directly
+                if getPoint failed.
+            */
+            if (!point &&
+                this.gradientManager.points
+                    [pointId]) {
+                point =
+                    this.gradientManager.points[
+                        pointId
+                    ];
+            }
+
             if (!point) {
-                console.warn(
+                console.error(
                     '[SpectrumScreen] ' +
-                    'Created gradient not found:',
+                    'Gradient point missing:',
                     pointId
                 );
 
@@ -1884,7 +3315,7 @@
 
             if (!Number.isFinite(
                     Number(point.radiusOctaves))) {
-                point.radiusOctaves = 1.0;
+                point.radiusOctaves = 1.5;
             }
 
             this.gradientManager
@@ -1892,18 +3323,12 @@
 
             this.targetCurveDirty = true;
 
-            var prefix =
+            const prefix =
                 'GRADIENT_' + pointId;
 
             if (JuceBridge &&
                 JuceBridge.isJuceAvailable()) {
-                JuceBridge.setParameter(
-                    prefix + '_ENABLE',
-                    1.0
-                );
-
-                JuceBridge.setParameter(
-                    prefix + '_CENTER_FREQ',
+                const freqNorm =
                     Math.max(
                         0.0,
                         Math.min(
@@ -1912,22 +3337,19 @@
                                 freq / 20.0
                             ) / 3.0
                         )
-                    )
-                );
+                    );
 
-                JuceBridge.setParameter(
-                    prefix + '_CENTER_GAIN',
+                const gainNorm =
                     Math.max(
                         0.0,
                         Math.min(
                             1.0,
-                            (gainDb + 60.0) / 120.0
+                            (gainDb + 60.0)
+                            / 120.0
                         )
-                    )
-                );
+                    );
 
-                JuceBridge.setParameter(
-                    prefix + '_BANDWIDTH',
+                const bandwidthNorm =
                     Math.max(
                         0.0,
                         Math.min(
@@ -1935,7 +3357,39 @@
                             (point.radiusOctaves
                                 - 0.5) / 3.5
                         )
-                    )
+                    );
+
+                console.log(
+                    '[SpectrumScreen] Creating ' +
+                    'gradient:',
+                    pointId,
+                    'freq=', freq,
+                    'freqNorm=', freqNorm,
+                    'gain=', gainDb,
+                    'gainNorm=', gainNorm
+                );
+
+                /*
+                    Enable the slot first.
+                */
+                JuceBridge.setParameter(
+                    prefix + '_ENABLE',
+                    1.0
+                );
+
+                JuceBridge.setParameter(
+                    prefix + '_CENTER_FREQ',
+                    freqNorm
+                );
+
+                JuceBridge.setParameter(
+                    prefix + '_CENTER_GAIN',
+                    gainNorm
+                );
+
+                JuceBridge.setParameter(
+                    prefix + '_BANDWIDTH',
+                    bandwidthNorm
                 );
             }
 
@@ -1944,6 +3398,8 @@
 
             if (this.onGradientParamsChanged)
                 this.onGradientParamsChanged();
+
+            this.render();
 
             return pointId;
         }

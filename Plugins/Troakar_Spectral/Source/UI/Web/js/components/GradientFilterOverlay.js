@@ -81,6 +81,7 @@
 
             // G1..G4 Badges
             this.manager.points.forEach(function (pt) {
+                if (!pt.active) return;
                 var badge      = document.createElement('div');
                 badge.className = 'gradient-badge'
                     + (pt.isSelected ? ' active' : '');

@@ -90,3 +90,35 @@
         0 1px 3px rgba(0, 0, 0, 0.8);
     border-color: #5ae6f0;
 }
+
+/*
+    Δ local audition button.
+
+    It intentionally remains compact in the top bar, but the
+    delta glyph is large enough to be recognised instantly.
+*/
+.delta-audition-button {
+    min-width: 52px;
+    min-height: 30px;
+    padding: 2px 12px;
+
+    font-family:
+        "GOST Type B",
+        "Arial Unicode MS",
+        sans-serif;
+
+    font-size: 22px;
+    font-weight: 900;
+    line-height: 1;
+
+    letter-spacing: 0;
+}
+
+.delta-audition-button.red.active {
+    color: #ffffff;
+
+    text-shadow:
+        0 0 5px #ffffff,
+        0 0 12px rgba(255, 105, 90, 0.95),
+        0 1px 3px rgba(0, 0, 0, 0.9);
+}

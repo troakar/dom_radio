@@ -389,7 +389,9 @@ public:
                  float rawThresh,
                  std::atomic<float>* vizSpectrumL,
                  std::atomic<float>* vizDeltaL,
-                 std::atomic<float>* vizSidechain)
+                 std::atomic<float>* vizSidechain,
+                 std::atomic<float>* vizDetectorDb,
+                 std::atomic<float>* vizEffectiveTargetDb)
     {
         const int numSamples  = buffer.getNumSamples();
         const int numChannels = juce::jmin(buffer.getNumChannels(), 2);
@@ -417,7 +419,8 @@ public:
             if (++hopCounter >= currentHopSize) {
                 hopCounter = 0;
                 processFFTFrame(numChannels, hasSidechain ? scChannels : 0, 
-                                rawThresh, vizSpectrumL, vizDeltaL, vizSidechain);
+                                rawThresh, vizSpectrumL, vizDeltaL, vizSidechain,
+                                vizDetectorDb, vizEffectiveTargetDb);
             }
         }
     }
@@ -425,7 +428,9 @@ public:
 private:
     void processFFTFrame(int numChannels, int scChannels, float rawGlobalThreshDb,
                          std::atomic<float>* vizSpectrumL, std::atomic<float>* vizDeltaL,
-                         std::atomic<float>* vizSidechain)
+                         std::atomic<float>* vizSidechain,
+                         std::atomic<float>* vizDetectorDb,
+                         std::atomic<float>* vizEffectiveTargetDb)
     {
         if (!envelopeSettled) {
             if (++settleCounter >= 16) envelopeSettled = true;
@@ -539,6 +544,17 @@ private:
             const float perceptualTiltDb = 3.0f * std::log2(tiltFreq / 1000.0f);
             
             envDbFast[bin] = rawDbFS + perceptualTiltDb;
+
+            /*
+                Publish the exact detector used by DSP.
+                Telemetry only — does not affect processing.
+            */
+            if (vizDetectorDb != nullptr)
+            {
+                vizDetectorDb[bin].store (
+                    envDbFast[bin],
+                    std::memory_order_relaxed);
+            }
         }
 
         // =====================================================================
@@ -578,6 +594,20 @@ private:
             const float envDb = envDbFast[bin];
             const float prominenceDb = envDb - spectralFloorDb[bin];
             const float targetLevelDb = binTargetDb[bin] + smoothGlobalThresh + binThreshOffsetDb[bin];
+
+            /*
+                Publish the exact per-bin target that is
+                compared with envDb by the DSP.
+
+                Includes EQ target, smoothed global
+                threshold, and gradient offset.
+            */
+            if (vizEffectiveTargetDb != nullptr)
+            {
+                vizEffectiveTargetDb[bin].store (
+                    targetLevelDb,
+                    std::memory_order_relaxed);
+            }
 
             const float deltaDb = envDb - targetLevelDb;
 

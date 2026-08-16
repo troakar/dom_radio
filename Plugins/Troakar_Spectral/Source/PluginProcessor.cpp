@@ -32,6 +32,10 @@ TroakarSpectralAudioProcessor::TroakarSpectralAudioProcessor()
     pKneeWidth = apvts.getRawParameterValue("KNEE_WIDTH");
     pLookaheadMs = apvts.getRawParameterValue("LOOKAHEAD_MS");
 
+    pAuditionEnable = apvts.getRawParameterValue("AUDITION_ENABLE");
+    pAuditionFreq = apvts.getRawParameterValue("AUDITION_FREQ");
+    pAuditionWidth = apvts.getRawParameterValue("AUDITION_WIDTH");
+
     for (int i = 0; i < 4; ++i) {
         juce::String prefix = "GRADIENT_" + juce::String(i);
         pGradEnable[i]  = apvts.getRawParameterValue(prefix + "_ENABLE");
@@ -117,6 +121,76 @@ int TroakarSpectralAudioProcessor::getViewRangeIndex() const noexcept
         }
     }
     return 3;
+}
+
+int TroakarSpectralAudioProcessor::getSpectrumBinCount() const noexcept
+{
+    return juce::jlimit (
+        2,
+        MAX_FFT_BINS,
+        getCurrentFFTSize() / 2 + 1);
+}
+
+int TroakarSpectralAudioProcessor::getSidechainBinCount() const noexcept
+{
+    return getSpectrumBinCount();
+}
+
+int TroakarSpectralAudioProcessor::getCompressionDeltaBinCount() const noexcept
+{
+    return getSpectrumBinCount();
+}
+
+int TroakarSpectralAudioProcessor::getDetectorBinCount() const noexcept
+{
+    return getSpectrumBinCount();
+}
+
+int TroakarSpectralAudioProcessor::getEffectiveTargetBinCount() const noexcept
+{
+    return getSpectrumBinCount();
+}
+
+float TroakarSpectralAudioProcessor::getAuditionFrequencyHz() const
+{
+    const auto normalized =
+        apvts.getRawParameterValue (
+            "AUDITION_FREQ")
+            ->load();
+
+    const auto safeNorm = juce::jlimit (
+        0.0f,
+        1.0f,
+        normalized);
+
+    return 20.0f
+        * std::pow (
+            1000.0f,
+            safeNorm);
+}
+
+float TroakarSpectralAudioProcessor::getAuditionWidthOctaves() const
+{
+    const auto normalized =
+        apvts.getRawParameterValue (
+            "AUDITION_WIDTH")
+            ->load();
+
+    const auto safeNorm = juce::jlimit (
+        0.0f,
+        1.0f,
+        normalized);
+
+    return 0.10f
+        + 3.90f
+        * safeNorm;
+}
+
+bool TroakarSpectralAudioProcessor::isAuditionEnabled() const noexcept
+{
+    return pAuditionEnable
+        && pAuditionEnable->load()
+            >= 0.5f;
 }
 
 void TroakarSpectralAudioProcessor::parameterChanged (const juce::String& parameterID, float /*newValue*/)
@@ -337,9 +411,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout TroakarSpectralAudioProcesso
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "LOOKAHEAD_MS", "Look-Ahead",
         juce::NormalisableRange<float>(0.0f, 10.0f, 0.1f), 5.0f,
-        FloatAttr().withStringFromValueFunction([](float v, int) { 
-            return juce::String(v, 1) + " ms"; 
+        FloatAttr().withStringFromValueFunction([](float v, int) {
+            return juce::String(v, 1) + " ms";
         })));
+
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        "AUDITION_ENABLE", "Audition Enable", false));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "AUDITION_FREQ", "Audition Frequency",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.0001f), 0.5663f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "AUDITION_WIDTH", "Audition Width",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.2308f));
 
     for (int g = 0; g < 4; ++g)
     {
@@ -388,6 +473,8 @@ void TroakarSpectralAudioProcessor::prepareToPlay (double sampleRate, int sample
         spectrumDataLeft[i].store(0.0f, std::memory_order_relaxed);
         compressionDeltaData[i].store(0.0f, std::memory_order_relaxed);
         sidechainData[i].store(0.0f, std::memory_order_relaxed);
+        detectorData[i].store(-120.0f, std::memory_order_relaxed);
+        effectiveTargetData[i].store(0.0f, std::memory_order_relaxed);
     }
 
     juce::dsp::ProcessSpec spec;
@@ -527,6 +614,8 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             spectrumDataLeft[i].store(0.0f, std::memory_order_relaxed);
             compressionDeltaData[i].store(0.0f, std::memory_order_relaxed);
             sidechainData[i].store(0.0f, std::memory_order_relaxed);
+            detectorData[i].store(-120.0f, std::memory_order_relaxed);
+            effectiveTargetData[i].store(0.0f, std::memory_order_relaxed);
         }
 
         visualFFTSize.store(currentFFTSize, std::memory_order_release);
@@ -563,7 +652,15 @@ void TroakarSpectralAudioProcessor::processBlock(juce::AudioBuffer<float>& buffe
             audioThreadGradients, getSampleRate());
     }
 
-    spectralEngine.process(mainBus, hasSidechain ? &sidechainBus : nullptr, *pThresh, spectrumDataLeft, compressionDeltaData, sidechainData);
+    spectralEngine.process(
+        mainBus,
+        hasSidechain ? &sidechainBus : nullptr,
+        *pThresh,
+        spectrumDataLeft,
+        compressionDeltaData,
+        sidechainData,
+        detectorData,
+        effectiveTargetData);
 
     visualFFTSize.store(currentFFTSize, std::memory_order_release);
 
@@ -631,7 +728,7 @@ void TroakarSpectralAudioProcessor::setEditorSize (
         1300.0 / 780.0;
 
     width = juce::jlimit (
-        975,
+        990,
         1950,
         width);
 

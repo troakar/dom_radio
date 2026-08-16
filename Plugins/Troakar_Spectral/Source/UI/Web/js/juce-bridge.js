@@ -169,14 +169,21 @@
         spectrum: [],
         sidechain: [],
         delta: [],
+        detector: [],
+        effectiveTarget: [],
+
         rms: 0.0,
         peak: 0.0,
+
         fftSize: 512,
         numBins: 257,
         sampleRate: 44100.0,
+
         spectrumFormat: 'linearMagnitude',
         sidechainFormat: 'linearMagnitude',
         deltaFormat: 'decibels',
+        detectorFormat: 'decibels',
+        effectiveTargetFormat: 'decibels',
         hasAnalysis: false
     };
 
@@ -233,6 +240,12 @@
         cachedAnalysisData.delta =
             data.delta || [];
 
+        cachedAnalysisData.detector =
+            data.detector || [];
+
+        cachedAnalysisData.effectiveTarget =
+            data.effectiveTarget || [];
+
         cachedAnalysisData.rms =
             Number(data.rms) || 0.0;
 
@@ -259,6 +272,14 @@
 
         cachedAnalysisData.deltaFormat =
             data.deltaFormat
+                || 'decibels';
+
+        cachedAnalysisData.detectorFormat =
+            data.detectorFormat
+                || 'decibels';
+
+        cachedAnalysisData.effectiveTargetFormat =
+            data.effectiveTargetFormat
                 || 'decibels';
 
         cachedAnalysisData.hasAnalysis =

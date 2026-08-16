@@ -13,6 +13,7 @@
             this.state = initialState !== undefined ? initialState : false;
             this.colorClass = colorClass || 'amber';
             this.removeParameterListener = null;
+            this.onStateChange = null;
 
             if (!this.element.classList.contains('backlit-button')) {
                 this.element.classList.add('backlit-button', this.colorClass);
@@ -32,29 +33,64 @@
                 const valPromise = JuceBridge.getParameter(this.paramId);
                 if (valPromise && typeof valPromise.then === 'function') {
                     valPromise.then((val) => {
-                        if (val !== null && val !== undefined) {
-                            this.state = Number(val) >= 0.5;
-                            this.render();
+                        if (val === null || val === undefined) {
+                            return;
                         }
+
+                        this.state = Number(val) >= 0.5;
+                        this.render();
+                        this.notifyStateChange(true);
                     });
+                } else if (valPromise !== null &&
+                           valPromise !== undefined) {
+                    this.state = Number(valPromise) >= 0.5;
+                    this.render();
+                    this.notifyStateChange(true);
                 }
             }
+
             if (JuceBridge && JuceBridge.isJuceAvailable()) {
                 this.removeParameterListener = JuceBridge.onParamUpdate(this.paramId, (val) => {
                     this.state = Number(val) >= 0.5;
                     this.render();
+                    this.notifyStateChange(true);
                 });
+            }
+        }
+
+        notifyStateChange(fromHost) {
+            if (typeof this.onStateChange === 'function') {
+                this.onStateChange(this.state, fromHost === true);
             }
         }
 
         init() {
             var self = this;
 
-            this.element.addEventListener('click', function () {
-                self.state = !self.state;
-                self.render();
-                if (JuceBridge) JuceBridge.setParameter(self.paramId, self.state ? 1.0 : 0.0);
-            });
+            this.element.addEventListener(
+                'click',
+                function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    self.state = !self.state;
+                    self.render();
+
+                    /*
+                        SPEED_AUTO APVTS toggle.
+                        1.0 = automatic timing
+                        0.0 = manual timing
+                    */
+                    if (JuceBridge) {
+                        JuceBridge.setParameter(
+                            self.paramId,
+                            self.state ? 1.0 : 0.0
+                        );
+                    }
+
+                    self.notifyStateChange(false);
+                }
+            );
 
             this.element.addEventListener('mousedown', function () {
                 self.element.classList.add('pressed');
@@ -75,9 +111,17 @@
             }
         }
 
-        setState(state) {
-            this.state = state;
+        setState(state, fromHost) {
+            const nextState = state === true;
+
+            if (this.state === nextState) {
+                this.render();
+                return;
+            }
+
+            this.state = nextState;
             this.render();
+            this.notifyStateChange(fromHost === true);
         }
 
         getState() {

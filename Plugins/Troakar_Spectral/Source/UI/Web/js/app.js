@@ -100,6 +100,12 @@
 
         var knobs  = new Map();
         var buttons = new Map();
+        var controlsReady = false;
+
+        // Global flag: true while any gradient knob is being dragged.
+        // Prevents echo/feedback loops when JUCE echoes back paramUpdate
+        // during an active drag gesture.
+        var isDraggingGradient = false;
 
         function createKnob(key, elementId, parameterId, options) {
             TroakarConsole.debug(
@@ -194,7 +200,12 @@
             'knob-amount',
             'AMOUNT',
             {
-                defaultValue: 0.65,
+                min: 0,
+                max: 300,
+                skew: 0.65,
+                unit: '%',
+                decimals: 0,
+                defaultValue: Math.pow(100.0 / 300.0, 0.65),
                 type: 'big',
                 allowInGradientMode: true
             }
@@ -205,7 +216,12 @@
             'knob-up-range',
             'UPWARD_RANGE',
             {
-                defaultValue: 0.4,
+                min: 0,
+                max: 48,
+                skew: 0.70,
+                unit: 'dB',
+                decimals: 1,
+                defaultValue: Math.pow(4.0 / 48.0, 0.70),
                 type: 'big',
                 allowInGradientMode: true
             }
@@ -216,7 +232,15 @@
             'knob-up-sel',
             'UP_SEL',
             {
+                /*
+                    APVTS range: -100 ... 0 ... +100
+                    Normalized 0.5 = real 0.
+                */
                 defaultValue: 0.5,
+                min: -100,
+                max: 100,
+                unit: '%',
+                decimals: 0,
                 type: 'medium',
                 allowInGradientMode: true
             }
@@ -227,7 +251,11 @@
             'knob-up-smooth',
             'UP_SMOOTH',
             {
-                defaultValue: 0.5,
+                min: 0,
+                max: 1000,
+                unit: 'ms',
+                decimals: 0,
+                defaultValue: 0.15,
                 type: 'medium',
                 allowInGradientMode: true
             }
@@ -249,7 +277,15 @@
             'knob-down-sel',
             'DOWN_SEL',
             {
+                /*
+                    APVTS range: -100 ... 0 ... +100
+                    Normalized 0.5 = real 0.
+                */
                 defaultValue: 0.5,
+                min: -100,
+                max: 100,
+                unit: '%',
+                decimals: 0,
                 type: 'medium',
                 allowInGradientMode: true
             }
@@ -260,6 +296,10 @@
             'knob-down-smooth',
             'DOWN_SMOOTH',
             {
+                min: 0,
+                max: 1000,
+                unit: 'ms',
+                decimals: 0,
                 defaultValue: 0.15,
                 type: 'medium',
                 allowInGradientMode: true
@@ -327,10 +367,208 @@
         buttons.set('link',   new BacklitButton('btn-link',     'IO_LINK',    false, 'cyan'));
         buttons.set('speed-auto', new BacklitButton('btn-speed-auto', 'SPEED_AUTO', true, 'amber'));
 
+        buttons.get('link').onStateChange = function (isLinked, fromHost) {
+            var inKnob = knobs.get('in-gain');
+            var outKnob = knobs.get('out-lvl');
+
+            if (inKnob) inKnob.setLinked(isLinked);
+            if (outKnob) outKnob.setLinked(isLinked);
+
+            if (inKnob) lastInGain = inKnob.value;
+            if (outKnob) lastOutLvl = outKnob.value;
+
+            console.log('[Troakar] IO_LINK changed:', isLinked ? 'ON' : 'OFF', fromHost ? '(host/APVTS)' : '(user)');
+        };
+
         // ================================================================
-        // 4. Dynamic knob binding to active gradient (port of
-        //    PluginEditor.cpp::updateKnobStates())
+        // 3.1. Timing mode + SILA label helpers
         // ================================================================
+        function applyTimingMode(isAuto) {
+            const timingSection =
+                document.querySelector('.timing-section');
+
+            if (!timingSection)
+                return;
+
+            const automaticView =
+                timingSection.querySelector('.timing-view-auto');
+
+            const manualView =
+                timingSection.querySelector('.timing-view-manual');
+
+            if (automaticView) {
+                automaticView.classList.toggle('active', isAuto);
+            }
+
+            if (manualView) {
+                manualView.classList.toggle('active', !isAuto);
+            }
+
+            timingSection.classList.toggle('is-auto-mode', isAuto);
+            timingSection.classList.toggle('is-manual-mode', !isAuto);
+
+            if (controlsReady) {
+                updateKnobBindings();
+            }
+
+            console.log('[Troakar] Compression timing mode:', isAuto ? 'AUTOMATIC' : 'MANUAL');
+        }
+
+        function updateSilaLabel() {
+            const silaLabel =
+                document.getElementById('sila-label');
+
+            if (!silaLabel)
+                return;
+
+            const activeGradient =
+                gradientManager.getActivePoint();
+
+            const isActive =
+                activeGradient && activeGradient.active;
+
+            const color =
+                isActive
+                    ? activeGradient.color
+                    : '#d4a446';
+
+            silaLabel.style.setProperty('--sila-color', color);
+            silaLabel.style.color = color;
+            silaLabel.style.textShadow =
+                '0 1px 0 rgba(0,0,0,0.95),'
+                + '0 -1px 0 rgba(255,255,255,0.12),'
+                + '0 0 7px ' + color + ','
+                + '0 0 15px ' + color + '99';
+
+            silaLabel.classList.toggle('is-gradient-active', !!isActive);
+        }
+
+        buttons.get('speed-auto').onStateChange =
+            function (isAuto, fromHost) {
+                applyTimingMode(isAuto);
+
+                console.log('[Troakar] SPEED_AUTO changed:', isAuto ? 1 : 0, fromHost ? '(host/APVTS)' : '(user)');
+            };
+
+        /*
+            Δ audition is enabled by the existing DELTA_MODE
+            APVTS parameter. Frequency and width are sent by
+            SpectrumScreen when the user hovers/drags an EQ or
+            gradient point.
+        */
+        buttons.get('delta').onStateChange =
+            function (isEnabled, fromHost) {
+                if (!JuceBridge ||
+                    !JuceBridge.isJuceAvailable()) {
+                    return;
+                }
+
+                /*
+                    When Δ is turned off, explicitly disable
+                    DSP local audition even if an old focus
+                    frequency remains in the parameter state.
+                */
+                if (!isEnabled) {
+                    JuceBridge.setParameter(
+                        'AUDITION_ENABLE',
+                        0.0
+                    );
+                    return;
+                }
+
+                /*
+                    If a point is already hovered, moving the
+                    mouse will immediately update frequency.
+                    DSP remains silent until that focus arrives.
+                */
+                JuceBridge.setParameter(
+                    'AUDITION_ENABLE',
+                    0.0
+                );
+
+                console.log(
+                    '[Troakar] Δ local audition enabled',
+                    fromHost ? '(host/APVTS)' : '(user)'
+                );
+            };
+
+        // ================================================================
+        // 4. Dynamic knob binding to active gradient
+        // ================================================================
+        function setKnobGradientState(knobId, isGradientActive, color) {
+            const knob = knobs.get(knobId);
+
+            if (!knob) {
+                console.warn(
+                    '[Troakar] Missing knob during binding:',
+                    knobId
+                );
+                return;
+            }
+
+            if (typeof knob.setGradientActive !== 'function') {
+                console.warn(
+                    '[Troakar] Knob has no setGradientActive():',
+                    knobId
+                );
+                return;
+            }
+
+            knob.setGradientActive(isGradientActive, color);
+        }
+
+        function bindKnobToParameter(
+            knobId,
+            parameterId
+        ) {
+            const knob = knobs.get(knobId);
+
+            if (!knob) {
+                console.warn(
+                    '[Troakar] Missing knob during parameter bind:',
+                    knobId,
+                    '->',
+                    parameterId
+                );
+
+                return false;
+            }
+
+            if (typeof knob.bindToParameter !== 'function') {
+                console.warn(
+                    '[Troakar] Knob has no bindToParameter():',
+                    knobId,
+                    '->',
+                    parameterId
+                );
+
+                return false;
+            }
+
+            knob.bindToParameter(parameterId);
+
+            // If this knob is bound to a gradient parameter, wire up
+            // the global drag flag so paramUpdate handlers can skip sync.
+            if (parameterId && parameterId.indexOf('GRADIENT_') === 0) {
+                if (typeof knob.beginDrag === 'function') {
+                    var _origBeginDrag = knob.beginDrag.bind(knob);
+                    knob.beginDrag = function (event) {
+                        isDraggingGradient = true;
+                        _origBeginDrag(event);
+                    };
+                }
+                if (typeof knob.endDrag === 'function') {
+                    var _origEndDrag = knob.endDrag.bind(knob);
+                    knob.endDrag = function (event) {
+                        _origEndDrag(event);
+                        isDraggingGradient = false;
+                    };
+                }
+            }
+
+            return true;
+        }
+
         function updateKnobBindings() {
             var activePt  = gradientManager.getActivePoint();
             var isGlobal  = !gradientManager.hasActivePoint();
@@ -338,69 +576,150 @@
             var isAuto    = buttons.get('speed-auto').getState();
 
             // I/O knobs — never gradient
-            knobs.get('in-gain').setGradientActive(false, capColor);
-            knobs.get('out-lvl').setGradientActive(false, capColor);
-            knobs.get('mix').setGradientActive(false, capColor);
+            setKnobGradientState('in-gain', false, capColor);
+            setKnobGradientState('out-lvl', false, capColor);
+            setKnobGradientState('mix', false, capColor);
 
             // Dynamics knobs
-            knobs.get('amount').setGradientActive(!isGlobal, capColor);
-            knobs.get('up-range').setGradientActive(!isGlobal, capColor);
-            knobs.get('down-range').setGradientActive(!isGlobal, capColor);
-            knobs.get('up-smooth').setGradientActive(!isGlobal, capColor);
-            knobs.get('down-smooth').setGradientActive(!isGlobal, capColor);
-            knobs.get('up-sel').setGradientActive(!isGlobal, capColor);
-            knobs.get('down-sel').setGradientActive(!isGlobal, capColor);
+            setKnobGradientState('amount', !isGlobal, capColor);
+            setKnobGradientState('up-range', !isGlobal, capColor);
+            setKnobGradientState('down-range', !isGlobal, capColor);
+            setKnobGradientState('up-smooth', !isGlobal, capColor);
+            setKnobGradientState('down-smooth', !isGlobal, capColor);
+            setKnobGradientState('up-sel', !isGlobal, capColor);
+            setKnobGradientState('down-sel', !isGlobal, capColor);
 
             // Timing knobs
             if (isAuto) {
-                knobs.get('speed').setGradientActive(!isGlobal, capColor);
-                knobs.get('attack').setGradientActive(false, capColor);
-                knobs.get('release').setGradientActive(false, capColor);
-                knobs.get('knee').setGradientActive(false, capColor);
+                setKnobGradientState('speed', !isGlobal, capColor);
+                setKnobGradientState('attack', false, capColor);
+                setKnobGradientState('release', false, capColor);
+                setKnobGradientState('knee', false, capColor);
             } else {
-                knobs.get('speed').setGradientActive(false, capColor);
-                knobs.get('attack').setGradientActive(!isGlobal, capColor);
-                knobs.get('release').setGradientActive(!isGlobal, capColor);
-                knobs.get('knee').setGradientActive(!isGlobal, capColor);
+                setKnobGradientState('speed', false, capColor);
+                setKnobGradientState('attack', !isGlobal, capColor);
+                setKnobGradientState('release', !isGlobal, capColor);
+                setKnobGradientState('knee', !isGlobal, capColor);
             }
 
             // Re-bind parameters
             if (!isGlobal && activePt) {
                 var prefix = 'GRADIENT_' + activePt.id;
-                knobs.get('amount').bindToParameter(prefix + '_AMOUNT');
-                knobs.get('up-range').bindToParameter(prefix + '_UP_MAX');
-                knobs.get('down-range').bindToParameter(prefix + '_DOWN_MAX');
-                knobs.get('up-smooth').bindToParameter(prefix + '_UP_SMOOTH');
-                knobs.get('down-smooth').bindToParameter(prefix + '_DOWN_SMOOTH');
-                knobs.get('up-sel').bindToParameter(prefix + '_UP_SEL');
-                knobs.get('down-sel').bindToParameter(prefix + '_DOWN_SEL');
+
+                bindKnobToParameter(
+                    'amount',
+                    prefix + '_AMOUNT'
+                );
+
+                bindKnobToParameter(
+                    'up-range',
+                    prefix + '_UP_MAX'
+                );
+
+                bindKnobToParameter(
+                    'down-range',
+                    prefix + '_DOWN_MAX'
+                );
+
+                bindKnobToParameter(
+                    'up-smooth',
+                    prefix + '_UP_SMOOTH'
+                );
+
+                bindKnobToParameter(
+                    'down-smooth',
+                    prefix + '_DOWN_SMOOTH'
+                );
+
+                bindKnobToParameter(
+                    'up-sel',
+                    prefix + '_UP_SEL'
+                );
+
+                bindKnobToParameter(
+                    'down-sel',
+                    prefix + '_DOWN_SEL'
+                );
 
                 if (isAuto) {
-                    knobs.get('speed').bindToParameter(prefix + '_SPEED');
+                    bindKnobToParameter(
+                        'speed',
+                        prefix + '_SPEED'
+                    );
                 } else {
-                    knobs.get('attack').bindToParameter(prefix + '_ATTACK');
-                    knobs.get('release').bindToParameter(prefix + '_RELEASE');
-                    knobs.get('knee').bindToParameter(prefix + '_KNEE');
+                    bindKnobToParameter(
+                        'attack',
+                        prefix + '_ATTACK'
+                    );
+
+                    bindKnobToParameter(
+                        'release',
+                        prefix + '_RELEASE'
+                    );
+
+                    bindKnobToParameter(
+                        'knee',
+                        prefix + '_KNEE'
+                    );
                 }
             } else {
-                // Global mode
-                knobs.get('amount').bindToParameter('AMOUNT');
-                knobs.get('up-range').bindToParameter('UPWARD_RANGE');
-                knobs.get('down-range').bindToParameter('DOWNWARD_RANGE');
-                knobs.get('up-smooth').bindToParameter('UP_SMOOTH');
-                knobs.get('down-smooth').bindToParameter('DOWN_SMOOTH');
-                knobs.get('up-sel').bindToParameter('UP_SEL');
-                knobs.get('down-sel').bindToParameter('DOWN_SEL');
+                bindKnobToParameter(
+                    'amount',
+                    'AMOUNT'
+                );
+
+                bindKnobToParameter(
+                    'up-range',
+                    'UPWARD_RANGE'
+                );
+
+                bindKnobToParameter(
+                    'down-range',
+                    'DOWNWARD_RANGE'
+                );
+
+                bindKnobToParameter(
+                    'up-smooth',
+                    'UP_SMOOTH'
+                );
+
+                bindKnobToParameter(
+                    'down-smooth',
+                    'DOWN_SMOOTH'
+                );
+
+                bindKnobToParameter(
+                    'up-sel',
+                    'UP_SEL'
+                );
+
+                bindKnobToParameter(
+                    'down-sel',
+                    'DOWN_SEL'
+                );
 
                 if (isAuto) {
-                    knobs.get('speed').bindToParameter('SPECTRAL_SPEED');
+                    bindKnobToParameter(
+                        'speed',
+                        'SPECTRAL_SPEED'
+                    );
                 } else {
-                    knobs.get('attack').bindToParameter('ATTACK_MS');
-                    knobs.get('release').bindToParameter('RELEASE_MS');
-                    knobs.get('knee').bindToParameter('KNEE_WIDTH');
+                    bindKnobToParameter(
+                        'attack',
+                        'ATTACK_MS'
+                    );
+
+                    bindKnobToParameter(
+                        'release',
+                        'RELEASE_MS'
+                    );
+
+                    bindKnobToParameter(
+                        'knee',
+                        'KNEE_WIDTH'
+                    );
                 }
 
-                // Set gradient markers on all knobs (port of C++ setGradientMarkers)
                 if (gradientManager.points.length > 0) {
                     setGradientMarkersOnKnobs();
                 }
@@ -415,20 +734,22 @@
             };
 
             gradientManager.points.forEach(function (p) {
-                markers.amount.push({ id: p.id, normalizedValue: p.amountPct / 300.0, color: p.color });
-                markers.upRange.push({ id: p.id, normalizedValue: p.upMaxDb / 48.0, color: p.color });
-                markers.downRange.push({ id: p.id, normalizedValue: (-p.downMaxDb) / 24.0, color: p.color });
-                markers.upSmooth.push({ id: p.id, normalizedValue: p.upSmoothPct / 100.0, color: p.color });
-                markers.downSmooth.push({ id: p.id, normalizedValue: p.downSmoothPct / 100.0, color: p.color });
-                markers.upSel.push({ id: p.id, normalizedValue: (p.upSelectivity + 100) / 200, color: p.color });
-                markers.downSel.push({ id: p.id, normalizedValue: (p.downSelectivity + 100) / 200, color: p.color });
+                if (!p.active) return;
+                
+                markers.amount.push({ id: p.id, normalizedValue: p.normAmount, color: p.color });
+                markers.upRange.push({ id: p.id, normalizedValue: p.normUpMax, color: p.color });
+                markers.downRange.push({ id: p.id, normalizedValue: p.normDownMax, color: p.color });
+                markers.upSmooth.push({ id: p.id, normalizedValue: p.normUpSmooth, color: p.color });
+                markers.downSmooth.push({ id: p.id, normalizedValue: p.normDownSmooth, color: p.color });
+                markers.upSel.push({ id: p.id, normalizedValue: p.normUpSel, color: p.color });
+                markers.downSel.push({ id: p.id, normalizedValue: p.normDownSel, color: p.color });
 
                 if (p.useAutoSpeed) {
-                    markers.speed.push({ id: p.id, normalizedValue: p.speedPct / 100.0, color: p.color });
+                    markers.speed.push({ id: p.id, normalizedValue: p.normSpeed, color: p.color });
                 } else {
-                    markers.attack.push({ id: p.id, normalizedValue: (p.attackMs - 0.1) / 199.9, color: p.color });
-                    markers.release.push({ id: p.id, normalizedValue: (p.releaseMs - 10) / 490, color: p.color });
-                    markers.knee.push({ id: p.id, normalizedValue: p.kneeWidthDb / 12.0, color: p.color });
+                    markers.attack.push({ id: p.id, normalizedValue: p.normAttack, color: p.color });
+                    markers.release.push({ id: p.id, normalizedValue: p.normRelease, color: p.color });
+                    markers.knee.push({ id: p.id, normalizedValue: p.normKnee, color: p.color });
                 }
             });
 
@@ -474,51 +795,104 @@
         function setupParamListeners() {
             if (!JuceBridge || !JuceBridge.isJuceAvailable()) return;
 
-            // Gradient parameter changes → re-sync gradient manager
+            // Gradient parameter changes → update specific point only
             for (var g = 0; g < 4; ++g) {
-                var prefix = 'GRADIENT_' + g;
-                JuceBridge.onParamUpdate(prefix + '_ENABLE', function () {
-                    gradientManager.syncFromJuce(JuceBridge);
-                    gradientOverlay.render();
-                    updateKnobBindings();
-                    mainScreen.targetCurveDirty = true;
-                });
-                JuceBridge.onParamUpdate(prefix + '_CENTER_FREQ',   function () {
-                    if (gradientManager.points.length > 0) {
-                        gradientManager.syncFromJuce(JuceBridge);
-                        if (gradientManager.points.some(function (p) { return p.isSelected; })) {
-                            gradientManager.syncPointToJuce(JuceBridge,
-                                gradientManager.getActivePoint().id);
+                (function (gradientIndex) {
+                    var prefix = 'GRADIENT_' + gradientIndex;
+
+                    JuceBridge.onParamUpdate(
+                        prefix + '_ENABLE',
+                        function (val) {
+                            if (isDraggingGradient) return;
+                            var pt = gradientManager.getPoint(gradientIndex);
+                            if (!pt) return;
+                            pt.active = (Number(val) || 0) >= 0.5;
+
+                            gradientOverlay.render();
+                            mainScreen.targetCurveDirty = true;
+
+                            if (controlsReady) {
+                                updateSilaLabel();
+                                updateKnobBindings();
+                                setGradientMarkersOnKnobs();
+                            }
                         }
+                    );
+
+                    JuceBridge.onParamUpdate(prefix + '_CENTER_FREQ', function (val) {
+                        if (isDraggingGradient) return;
+                        var pt = gradientManager.getPoint(gradientIndex);
+                        if (!pt) return;
+                        pt.centerFreqHz = 20.0 * Math.pow(10.0, (Number(val) || 0) * 3.0);
                         mainScreen.targetCurveDirty = true;
-                    }
-                });
-                JuceBridge.onParamUpdate(prefix + '_CENTER_GAIN',  function () {
-                    gradientManager.syncFromJuce(JuceBridge);
-                    mainScreen.targetCurveDirty = true;
-                });
-                JuceBridge.onParamUpdate(prefix + '_BANDWIDTH',    function () {
-                    gradientManager.syncFromJuce(JuceBridge);
-                    mainScreen.targetCurveDirty = true;
-                });
+                    });
+
+                    JuceBridge.onParamUpdate(prefix + '_CENTER_GAIN', function (val) {
+                        if (isDraggingGradient) return;
+                        var pt = gradientManager.getPoint(gradientIndex);
+                        if (!pt) return;
+                        pt.centerGainDb = (Number(val) || 0) * 120.0 - 60.0;
+                        mainScreen.targetCurveDirty = true;
+                    });
+
+                    JuceBridge.onParamUpdate(prefix + '_BANDWIDTH', function (val) {
+                        if (isDraggingGradient) return;
+                        var pt = gradientManager.getPoint(gradientIndex);
+                        if (!pt) return;
+                        pt.radiusOctaves = (Number(val) || 0) * 3.5 + 0.5;
+                        mainScreen.targetCurveDirty = true;
+                    });
+
+                    // Normalized param listeners — just cache the raw value
+                    var normalizedParams = [
+                        '_AMOUNT', '_UP_MAX', '_DOWN_MAX', '_SPEED',
+                        '_UP_SMOOTH', '_DOWN_SMOOTH', '_UP_SEL', '_DOWN_SEL',
+                        '_ATTACK', '_RELEASE', '_KNEE', '_AUTO_SPEED'
+                    ];
+                    normalizedParams.forEach(function (suffix) {
+                        JuceBridge.onParamUpdate(prefix + suffix, function () {
+                            if (isDraggingGradient) return;
+                            var pt = gradientManager.getPoint(gradientIndex);
+                            if (!pt) return;
+                            var field = 'norm' + suffix.substring(1);
+                            if (field in pt) {
+                                pt[field] = Number(arguments[0]) || 0;
+                            }
+                            if (controlsReady) {
+                                setGradientMarkersOnKnobs();
+                            }
+                        });
+                    });
+                })(g);
             }
 
             // Speed auto button changes
             JuceBridge.onParamUpdate('SPEED_AUTO', function (val) {
-                buttons.get('speed-auto').setState(val >= 0.5);
-                var timingSec  = document.querySelector('.timing-section');
-                if (timingSec) {
-                    var autoView   = timingSec.querySelector('.timing-view-auto');
-                    var manualView = timingSec.querySelector('.timing-view-manual');
-                    if (autoView && manualView) {
-                        autoView.classList.toggle('active', val >= 0.5);
-                        manualView.classList.toggle('active', val < 0.5);
-                    }
-                }
-                updateKnobBindings();
+                buttons.get('speed-auto').setState(
+                    val >= 0.5,
+                    true
+                );
+
+                applyTimingMode(val >= 0.5);
             });
 
-            // EQ band parameter changes — direct sync, skip during drag
+            // IO_LINK button changes from host/automation
+            JuceBridge.onParamUpdate('IO_LINK', function (val) {
+                var isLinked = val >= 0.5;
+                var linkBtn = buttons.get('link');
+                if (linkBtn) {
+                    linkBtn.setState(isLinked, true);
+                }
+                var inKnob = knobs.get('in-gain');
+                var outKnob = knobs.get('out-lvl');
+                if (inKnob) inKnob.setLinked(isLinked);
+                if (outKnob) outKnob.setLinked(isLinked);
+            });
+
+            // DN MAX changes — refresh compression area immediately
+            JuceBridge.onParamUpdate('DOWNWARD_RANGE', function () {
+                mainScreen.render();
+            });
             for (let bi = 0; bi < 8; ++bi) {
                 let prefix = 'BAND_' + bi;
 
@@ -617,24 +991,29 @@
                 mainScreen.targetCurveDirty = true;
             });
 
-            // View range changes
-            JuceBridge.onParamUpdate('VIEW_RANGE', function (val) {
-                var depths = [24, 48, 72, 96, 120];
-                var idx = Math.round(val * (depths.length - 1));
-                mainScreen.setViewRange(depths[idx]);
-                var combo = document.getElementById('view-range-combo');
-                if (combo) combo.selectedIndex = idx;
-            });
+            /*
+                VIEW_RANGE is a legacy APVTS parameter.
+                It remains available for old sessions/presets,
+                but does not affect the calibrated graph scale.
+            */
+            JuceBridge.onParamUpdate(
+                'VIEW_RANGE',
+                function () {
+                    mainScreen.setViewRange(108.0);
+                }
+            );
         }
         setupParamListeners();
 
         // Connect screen callbacks
         mainScreen.onGradientSelectionChanged = function () {
             gradientOverlay.render();
+            updateSilaLabel();
             updateKnobBindings();
         };
         mainScreen.onGradientParamsChanged = function () {
             gradientOverlay.render();
+            updateSilaLabel();
             updateKnobBindings();
             if (JuceBridge && JuceBridge.isJuceAvailable() && gradientManager.points.length > 0) {
                 gradientManager.points.forEach(function (p) {
@@ -645,21 +1024,97 @@
             }
         };
 
+        mainScreen.onAuditionFocusChanged =
+            function (focus) {
+                var deltaButton =
+                    buttons.get('delta');
+
+                if (!deltaButton ||
+                    !deltaButton.getState()) {
+                    return;
+                }
+
+                if (!JuceBridge ||
+                    !JuceBridge.isJuceAvailable()) {
+                    return;
+                }
+
+                if (!focus ||
+                    !focus.active) {
+                    JuceBridge.setParameter(
+                        'AUDITION_ENABLE',
+                        0.0
+                    );
+                    return;
+                }
+
+                /*
+                    Frequency:
+                        20 Hz ... 20 kHz
+                        logarithmic normalized representation.
+
+                    Width:
+                        0.10 ... 4.00 octaves
+                        linear normalized representation.
+                */
+                var frequencyNorm =
+                    Math.max(
+                        0.0,
+                        Math.min(
+                            1.0,
+                            Math.log10(
+                                focus.frequencyHz / 20.0
+                            ) / 3.0
+                        )
+                    );
+
+                var widthNorm =
+                    Math.max(
+                        0.0,
+                        Math.min(
+                            1.0,
+                            (focus.widthOctaves - 0.10)
+                            / 3.90
+                        )
+                    );
+
+                JuceBridge.queueParameterChange(
+                    'AUDITION_FREQ',
+                    frequencyNorm
+                );
+
+                JuceBridge.queueParameterChange(
+                    'AUDITION_WIDTH',
+                    widthNorm
+                );
+
+                JuceBridge.queueParameterChange(
+                    'AUDITION_ENABLE',
+                    1.0
+                );
+            };
+
         // ================================================================
         // 5. IN/OUT LINK logic (port of PluginEditor.cpp)
         // ================================================================
+        // ================================================================
+        // 5. IN/OUT LINK logic (Inverse Gain-Staging Compensation)
+        // ================================================================
         var isUpdatingLink  = false;
-        var lastInGain      = knobs.get('in-gain').value;
-        var lastOutLvl      = knobs.get('out-lvl').value;
+        var lastInGain      = knobs.get('in-gain') ? knobs.get('in-gain').value : 0.5;
+        var lastOutLvl      = knobs.get('out-lvl') ? knobs.get('out-lvl').value : 0.5;
 
         knobs.get('in-gain').onValueChange = function (newVal) {
-            var isLinked = buttons.get('link').getState();
+            var isLinked = buttons.get('link') && buttons.get('link').getState();
             if (isLinked && !isUpdatingLink) {
                 isUpdatingLink = true;
                 var delta    = newVal - lastInGain;
+                // Компенсационный гейн-стейджинг: рост In уменьшает Out
                 var newOut   = Math.min(1.0, Math.max(0.0, knobs.get('out-lvl').value - delta));
                 knobs.get('out-lvl').setValue(newOut);
-                if (JuceBridge) JuceBridge.setParameter('OUT_LVL', newOut);
+                if (JuceBridge && JuceBridge.isJuceAvailable()) {
+                    JuceBridge.queueParameterChange('OUT_LVL', newOut);
+                }
                 lastOutLvl = newOut;
                 isUpdatingLink = false;
             }
@@ -667,13 +1122,16 @@
         };
 
         knobs.get('out-lvl').onValueChange = function (newVal) {
-            var isLinked = buttons.get('link').getState();
+            var isLinked = buttons.get('link') && buttons.get('link').getState();
             if (isLinked && !isUpdatingLink) {
                 isUpdatingLink = true;
                 var delta   = newVal - lastOutLvl;
+                // Компенсационный гейн-стейджинг: рост Out уменьшает In
                 var newIn   = Math.min(1.0, Math.max(0.0, knobs.get('in-gain').value - delta));
                 knobs.get('in-gain').setValue(newIn);
-                if (JuceBridge) JuceBridge.setParameter('IN_GAIN', newIn);
+                if (JuceBridge && JuceBridge.isJuceAvailable()) {
+                    JuceBridge.queueParameterChange('IN_GAIN', newIn);
+                }
                 lastInGain = newIn;
                 isUpdatingLink = false;
             }
@@ -681,26 +1139,33 @@
         };
 
         // ================================================================
-        // 6. TIMING MODE toggle (AUTO vs MANUAL)
+        // 6. COMBO BOXES
         // ================================================================
-        var btnSpeedAuto = document.getElementById('btn-speed-auto');
-        if (btnSpeedAuto) {
-            btnSpeedAuto.addEventListener('click', function () {
-                // BacklitButton already toggled state; just sync views
-                var isAuto     = buttons.get('speed-auto').getState();
-                var timingSec  = btnSpeedAuto.closest('.timing-section');
-                var autoView   = timingSec.querySelector('.timing-view-auto');
-                var manualView = timingSec.querySelector('.timing-view-manual');
+        var displayModeCombo =
+            document.getElementById(
+                'display-mode-combo'
+            );
 
-                btnSpeedAuto.classList.toggle('active', isAuto);
-                autoView.classList.toggle('active', isAuto);
-                manualView.classList.toggle('active', !isAuto);
-            });
+        if (displayModeCombo) {
+            mainScreen.displayMode =
+                displayModeCombo.value
+                    || 'detector';
+
+            displayModeCombo.addEventListener(
+                'change',
+                function (event) {
+                    mainScreen.displayMode =
+                        event.target.value
+                            || 'detector';
+
+                    mainScreen.targetCurveDirty =
+                        true;
+
+                    mainScreen.render();
+                }
+            );
         }
 
-        // ================================================================
-        // 7. Combo boxes
-        // ================================================================
         var fftCombo = document.getElementById('fft-combo');
         if (fftCombo) {
             fftCombo.addEventListener('change', function (e) {
@@ -712,18 +1177,14 @@
             });
         }
 
-        var viewRangeCombo = document.getElementById('view-range-combo');
+        var viewRangeCombo =
+            document.getElementById(
+                'view-range-combo'
+            );
+
         if (viewRangeCombo) {
-            viewRangeCombo.addEventListener('change', function (e) {
-                var depths = [24, 48, 72, 96, 120];
-                var selectedDepth = depths[e.target.selectedIndex] || 72;
-                if (mainScreen) mainScreen.setViewRange(selectedDepth);
-                if (JuceBridge && JuceBridge.isJuceAvailable()) {
-                    JuceBridge.setParameter('VIEW_RANGE', e.target.selectedIndex / 4.0);
-                } else {
-                    console.log('[Dev-Mock] VIEW_RANGE -> ' + selectedDepth + 'dB');
-                }
-            });
+            viewRangeCombo.disabled = true;
+            mainScreen.setViewRange(108.0);
         }
 
         // =====================================================================
@@ -774,6 +1235,13 @@
         // ================================================================
         // Expose for debugging + initial setup
         // ================================================================
+        controlsReady = true;
+
+        applyTimingMode(
+            buttons.get('speed-auto').getState()
+        );
+
+        updateSilaLabel();
         updateKnobBindings();
 
         root.troakarApp = {

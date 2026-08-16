@@ -37,12 +37,15 @@
             this.max        = (options.max !== undefined)     ? options.max     : (this.config.max     !== undefined ? this.config.max     : 1);
             this.unit       = (options.unit !== undefined)    ? options.unit    : (this.config.unit    || '');
             this.decimals   = (options.decimals !== undefined)? options.decimals: (this.config.decimals!== undefined ? this.config.decimals: 1);
+            this.skew       = (options.skew !== undefined)    ? options.skew    : (this.config.skew    !== undefined ? this.config.skew    : 1.0);
             this.type       = (options.type !== undefined)    ? options.type    : (this.config.type    || 'medium');
 
             // Normalized value 0..1
-            this.value = (options.defaultValue !== undefined)
+            this.defaultValue = (options.defaultValue !== undefined)
                 ? options.defaultValue
-                : (this.config.default !== undefined ? this.config.default : 0.5);
+                : 0.5;
+
+            this.value = this.defaultValue;
 
             this.valueDisplay = document.getElementById(elementId + '-value');
 
@@ -385,6 +388,10 @@
             this.updateRotation();
             this.updateDisplay();
 
+            if (typeof this.onValueChange === 'function') {
+                this.onValueChange(nextValue);
+            }
+
             this.queueParameterChange(nextValue);
         }
 
@@ -484,6 +491,11 @@
                 'lostpointercapture',
                 this.endDrag.bind(this)
             );
+
+            this.element.addEventListener(
+                'dblclick',
+                this.resetToDefault.bind(this)
+            );
         }
 
         updateRotation() {
@@ -494,17 +506,106 @@
         }
 
         updateDisplay() {
-            if (this.valueDisplay) {
-                var realVal    = this.min + this.value * (this.max - this.min);
-                this.valueDisplay.textContent =
-                    realVal.toFixed(this.decimals) + (this.unit ? ' ' + this.unit : '');
+            if (!this.valueDisplay)
+                return;
+
+            const normalized =
+                (this.skew !== 1.0 && this.value > 0)
+                    ? Math.pow(
+                        this.value,
+                        1.0 / this.skew
+                    )
+                    : this.value;
+
+            let realValue =
+                this.min
+                + normalized
+                * (this.max - this.min);
+
+            /*
+                Remove tiny floating-point residue:
+                0.0000001 -> 0.
+            */
+            if (Math.abs(realValue) <
+                Math.pow(
+                    10,
+                    -Math.max(0, this.decimals)
+                ) * 0.5) {
+                realValue = 0;
+            }
+
+            let prefix = '';
+
+            /*
+                Add + only for bipolar controls.
+            */
+            if (this.min < 0 &&
+                this.max > 0 &&
+                realValue > 0) {
+                prefix = '+';
+            }
+
+            this.valueDisplay.textContent =
+                prefix
+                + realValue.toFixed(this.decimals)
+                + (this.unit
+                    ? ' ' + this.unit
+                    : '');
+        }
+
+        resetToDefault(event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+
+            var targetValue =
+                Math.max(
+                    0.0,
+                    Math.min(
+                        1.0,
+                        this.defaultValue
+                    )
+                );
+
+            if (JuceBridge
+                && JuceBridge.isJuceAvailable()) {
+                JuceBridge.beginGesture(
+                    this.paramId
+                );
+            }
+
+            this.setValue(
+                targetValue
+            );
+
+            if (JuceBridge
+                && JuceBridge.isJuceAvailable()) {
+                JuceBridge.setParameter(
+                    this.paramId,
+                    targetValue
+                );
+                JuceBridge.endGesture(
+                    this.paramId
+                );
+
+            } else if (JuceBridge) {
+                JuceBridge.setParameter(
+                    this.paramId,
+                    targetValue
+                );
             }
         }
 
         setValue(normalizedValue) {
             this.value = Math.min(1.0, Math.max(0.0, normalizedValue));
+            this.lastSentValue = this.value;
             this.updateRotation();
             this.updateDisplay();
+
+            if (typeof this.onValueChange === 'function') {
+                this.onValueChange(this.value);
+            }
         }
 
         // =================================================================
@@ -516,6 +617,8 @@
                 return;
 
             this.paramId = paramId;
+            this.lastSentValue = this.value;
+            this.pendingParameterValue = null;
             this.fetchInitialValue();
         }
 
@@ -562,14 +665,18 @@
 
         setLinked(linked) {
             this.isLinkedState = linked;
-            var label = this.element.nextElementSibling;
-            if (label && label.classList.contains('dymo-label')) {
+            var parent = this.element.closest('.knob-group') || this.element.parentElement;
+            var label = parent ? parent.querySelector('.dymo-label, .knob-label') : null;
+            if (label) {
                 if (linked) {
                     label.style.color = 'var(--chassis-base, #d4a446)';
-                    label.innerHTML += ' <span style="font-size:9px;">L</span>';
+                    if (!label.querySelector('.link-badge')) {
+                        label.innerHTML += ' <span class="link-badge" style="font-size:9px; color:var(--led-cyan-on, #28c8d4);">[L]</span>';
+                    }
                 } else {
                     label.style.color = '';
-                    label.innerHTML = label.innerHTML.replace(/ <span[^>]*>L<\/span>/, '');
+                    var badge = label.querySelector('.link-badge');
+                    if (badge) badge.remove();
                 }
             }
         }

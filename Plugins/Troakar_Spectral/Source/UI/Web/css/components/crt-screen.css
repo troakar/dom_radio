@@ -15,8 +15,30 @@
         inset 0 0 30px rgba(0, 0, 0, 0.9),
         inset 0 0 60px rgba(0, 0, 0, 0.7);
     display: block;
-    width: 1106px;
-    height: 414px;
+    width: 1104px;
+    height: 412px;
+
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.crt-bezel {
+    position: relative;
+}
+
+.crt-glass-glare {
+    pointer-events: none;
+}
+
+.crt-bezel::before,
+.crt-bezel::after,
+.crt-screen::before,
+.crt-screen::after {
+    pointer-events: none;
 }
 
 .crt-screen canvas {

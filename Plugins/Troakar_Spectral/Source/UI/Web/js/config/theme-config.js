@@ -110,26 +110,26 @@
         },
 
         knobConfigs: {
-            'knob-in':          { min: -24, max: 24,  default: 0,   unit: 'dB', decimals: 1, type: 'medium', paramId: 'IN_GAIN' },
-            'knob-out':         { min: -24, max: 24,  default: 0,   unit: 'dB', decimals: 1, type: 'medium', paramId: 'OUT_LVL' },
-            'knob-mix':         { min: 0,   max: 100, default: 100, unit: '%',  decimals: 0, type: 'medium', paramId: 'MIX' },
+            'knob-in':          { min: -24, max: 24,   default: 0.5,  unit: 'dB', decimals: 1, type: 'medium', paramId: 'IN_GAIN' },
+            'knob-out':         { min: -24, max: 24,   default: 0.5,  unit: 'dB', decimals: 1, type: 'medium', paramId: 'OUT_LVL' },
+            'knob-mix':         { min: 0,   max: 100,  default: 1.0,  unit: '%',  decimals: 0, type: 'medium', paramId: 'MIX' },
 
-            'knob-amount':      { min: 0,   max: 100, default: 65,  unit: '%',  decimals: 0, type: 'big',    paramId: 'AMOUNT' },
+            'knob-amount':      { min: 0,   max: 300,  skew: 0.65, default: Math.pow(100/300, 0.65), unit: '%',  decimals: 0, type: 'big',    paramId: 'AMOUNT' },
 
-            'knob-up-range':    { min: 0,   max: 24,  default: 0,   unit: 'dB', decimals: 1, type: 'big',    paramId: 'UPWARD_RANGE' },
-            'knob-up-sel':      { min: 0,   max: 100, default: 50,  unit: '%',  decimals: 0, type: 'medium', paramId: 'UP_SEL' },
-            'knob-up-smooth':   { min: 0,   max: 500, default: 50,  unit: 'ms', decimals: 0, type: 'medium', paramId: 'UP_SMOOTH' },
+            'knob-up-range':    { min: 0,   max: 48,   skew: 0.70, default: Math.pow(4/48, 0.70),   unit: 'dB', decimals: 1, type: 'big',    paramId: 'UPWARD_RANGE' },
+            'knob-up-sel':      { min: -100, max: 100, default: 0.5, unit: '%',  decimals: 0, type: 'medium', paramId: 'UP_SEL' },
+            'knob-up-smooth':   { min: 0,   max: 100,  default: 0.5, unit: '%',  decimals: 0, type: 'medium', paramId: 'UP_SMOOTH' },
 
-            'knob-down-range':  { min: 0,   max: 24,  default: 0,   unit: 'dB', decimals: 1, type: 'big',    paramId: 'DOWNWARD_RANGE' },
-            'knob-down-sel':    { min: 0,   max: 100, default: 50,  unit: '%',  decimals: 0, type: 'medium', paramId: 'DOWN_SEL' },
-            'knob-down-smooth': { min: 0,   max: 500, default: 15,  unit: 'ms', decimals: 0, type: 'medium', paramId: 'DOWN_SMOOTH' },
+            'knob-down-range':  { min: 0,   max: 24,   default: 0.5, unit: 'dB', decimals: 1, type: 'big',    paramId: 'DOWNWARD_RANGE' },
+            'knob-down-sel':    { min: -100, max: 100, default: 0.5, unit: '%',  decimals: 0, type: 'medium', paramId: 'DOWN_SEL' },
+            'knob-down-smooth': { min: 0,   max: 100,  default: 0.15, unit: '%', decimals: 0, type: 'medium', paramId: 'DOWN_SMOOTH' },
 
-            'knob-speed':       { min: 5,   max: 500, default: 50,  unit: 'ms', decimals: 0, type: 'big',    paramId: 'SPECTRAL_SPEED' },
-            'knob-attack':      { min: 0.1, max: 200, default: 10,  unit: 'ms', decimals: 1, type: 'medium', paramId: 'ATTACK_MS' },
-            'knob-release':     { min: 10,  max: 500, default: 100, unit: 'ms', decimals: 0, type: 'medium', paramId: 'RELEASE_MS' },
-            'knob-knee':        { min: 0,   max: 12,  default: 6,   unit: 'dB', decimals: 1, type: 'medium', paramId: 'KNEE_WIDTH' },
+            'knob-speed':       { min: 0,   max: 100,  default: 0.5, unit: '%',  decimals: 0, type: 'big',    paramId: 'SPECTRAL_SPEED' },
+            'knob-attack':      { min: 0.1, max: 100,  skew: 0.3, default: Math.pow(5/100, 0.3),  unit: 'ms', decimals: 1, type: 'medium', paramId: 'ATTACK_MS' },
+            'knob-release':     { min: 10,  max: 1000, skew: 0.3, default: Math.pow(150/1000, 0.3), unit: 'ms', decimals: 0, type: 'medium', paramId: 'RELEASE_MS' },
+            'knob-knee':        { min: 0,   max: 12,   default: 0.25, unit: 'dB', decimals: 1, type: 'medium', paramId: 'KNEE_WIDTH' },
 
-            'knob-lookahead':   { min: 0,   max: 20,  default: 0,   unit: 'ms', decimals: 1, type: 'big',    paramId: 'LOOKAHEAD_MS' }
+            'knob-lookahead':   { min: 0,   max: 10,   default: 0.5, unit: 'ms', decimals: 1, type: 'big',    paramId: 'LOOKAHEAD_MS' }
         }
     };
 

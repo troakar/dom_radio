@@ -18,7 +18,7 @@
     <link rel="stylesheet" href="css/components/jack-socket.css">
     <link rel="stylesheet" href="css/components/gradient-overlay.css">
 </head>
-<body>
+<body oncontextmenu="return false;">
 
     <div class="device-chassis">
         <div class="chassis-texture"></div>
@@ -34,19 +34,31 @@
             <div id="gradient-overlay" class="gradient-overlay-container"></div>
 
             <div class="top-controls">
+                <select id="display-mode-combo" class="combo-box">
+                    <option value="detector" selected>DSP DETECTOR</option>
+                    <option value="spectrum">INPUT FFT</option>
+                </select>
                 <select id="fft-combo" class="combo-box">
                     <option>512 (Fast)</option>
                     <option selected>1024 (Balanced)</option>
                     <option>2048 (Precise)</option>
                 </select>
-                <select id="view-range-combo" class="combo-box">
-                    <option>24dB</option>
-                    <option>48dB</option>
-                    <option selected>72dB</option>
-                    <option>96dB</option>
-                    <option>120dB</option>
+                <select
+                    id="view-range-combo"
+                    class="combo-box combo-box-fixed-range"
+                    disabled
+                    aria-label="Fixed graph display range"
+                    title="Fixed display range: +12 dB to -96 dB"
+                >
+                    <option selected>108dB (+12 / -96)</option>
                 </select>
-                <button id="btn-delta" class="backlit-button red">DELTA</button>
+                <button
+                    id="btn-delta"
+                    class="backlit-button red delta-audition-button"
+                    type="button"
+                    aria-label="Local delta audition"
+                    title="Δ — Local delta audition"
+                >Δ</button>
             </div>
         </header>
 
@@ -89,7 +101,12 @@
             <div class="column-block">
                 <div class="knob-group">
                     <div id="knob-amount" class="chicken-knob big"></div>
-                    <span class="dymo-label">SIL AMOUNT</span>
+                    <span
+    id="sila-label"
+    class="sila-label"
+    aria-label="SILA amount"
+>SILA
+                    </span>
                     <span class="knob-value-display" id="knob-amount-value">0%</span>
                 </div>
             </div>

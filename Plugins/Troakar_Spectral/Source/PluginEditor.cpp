@@ -121,8 +121,18 @@ TroakarSpectralAudioProcessorEditor::TroakarSpectralAudioProcessorEditor (Troaka
         is 1300x780 and is scaled down via CSS transform
         to fit this window.
     */
+     /*
+        Logical Web UI artboard:
+            1300 x 780
+
+        New editor, exactly +10%:
+            990 x 594
+
+        990 / 1300 == 594 / 780
+        scale = 0.7615384615
+    */
     setResizable (false, false);
-    setSize (900, 540);
+    setSize (990, 594);
 
     startTimerHz (10);
 }
@@ -204,6 +214,51 @@ void TroakarSpectralAudioProcessorEditor::timerCallback()
     if (!webView)
         return;
 
+    /*
+        Inject a capture-phase contextmenu guard into
+        the WebView2 document.  This prevents the
+        browser's native right-click context menu
+        from appearing, which would otherwise steal
+        events from the gradient-creation handler.
+    */
+    if (!contextMenuGuardInjected)
+    {
+        webView->evaluateJavascript (
+            R"JS(
+                (function () {
+                    function blockContextMenu (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (e.stopImmediatePropagation)
+                            e.stopImmediatePropagation();
+                        return false;
+                    }
+
+                    document.addEventListener(
+                        'contextmenu',
+                        blockContextMenu,
+                        true
+                    );
+                    window.addEventListener(
+                        'contextmenu',
+                        blockContextMenu,
+                        true
+                    );
+
+                    document.oncontextmenu =
+                        function () {
+                            return false;
+                        };
+                    document.body.oncontextmenu =
+                        function () {
+                            return false;
+                        };
+                })();
+            )JS");
+
+        contextMenuGuardInjected = true;
+    }
+
     auto buildArray = [] (
         const std::atomic<float>* source,
         int count)
@@ -266,10 +321,35 @@ void TroakarSpectralAudioProcessorEditor::timerCallback()
     const int fftSize =
         juce::jmax (2, processor.getCurrentFFTSize());
 
-    const int sourceBins = juce::jlimit (
-        2,
-        TroakarSpectralAudioProcessor::MAX_FFT_BINS,
-        fftSize / 2 + 1);
+    const auto spectrumBins =
+        juce::jlimit (
+            2,
+            TroakarSpectralAudioProcessor::MAX_FFT_BINS,
+            processor.getSpectrumBinCount());
+
+    const auto sidechainBins =
+        juce::jlimit (
+            2,
+            TroakarSpectralAudioProcessor::MAX_FFT_BINS,
+            processor.getSidechainBinCount());
+
+    const auto deltaBins =
+        juce::jlimit (
+            2,
+            TroakarSpectralAudioProcessor::MAX_FFT_BINS,
+            processor.getCompressionDeltaBinCount());
+
+    const auto detectorBins =
+        juce::jlimit (
+            2,
+            TroakarSpectralAudioProcessor::MAX_FFT_BINS,
+            processor.getDetectorBinCount());
+
+    const auto effectiveTargetBins =
+        juce::jlimit (
+            2,
+            TroakarSpectralAudioProcessor::MAX_FFT_BINS,
+            processor.getEffectiveTargetBinCount());
 
     /*
         Send a lighter representation to the WebView.
@@ -284,22 +364,42 @@ void TroakarSpectralAudioProcessorEditor::timerCallback()
         "spectrum",
         buildUiArray (
             processor.spectrumDataLeft,
-            sourceBins,
+            spectrumBins,
             uiBins));
 
     data->setProperty (
         "sidechain",
         buildUiArray (
             processor.sidechainData,
-            sourceBins,
+            sidechainBins,
             uiBins));
 
     data->setProperty (
         "delta",
         buildUiArray (
             processor.compressionDeltaData,
-            sourceBins,
+            deltaBins,
             uiBins));
+
+    data->setProperty (
+        "detector",
+        buildUiArray (
+            processor.detectorData,
+            detectorBins,
+            uiBins));
+
+    data->setProperty (
+        "effectiveTarget",
+        buildUiArray (
+            processor.effectiveTargetData,
+            effectiveTargetBins,
+            uiBins));
+
+    data->setProperty ("spectrumBinCount", spectrumBins);
+    data->setProperty ("sidechainBinCount", sidechainBins);
+    data->setProperty ("deltaBinCount", deltaBins);
+    data->setProperty ("detectorBinCount", detectorBins);
+    data->setProperty ("effectiveTargetBinCount", effectiveTargetBins);
 
     data->setProperty ("fftSize", fftSize);
     data->setProperty ("numBins", uiBins);
@@ -318,6 +418,12 @@ void TroakarSpectralAudioProcessorEditor::timerCallback()
 
     data->setProperty (
         "deltaFormat", "decibels");
+
+    data->setProperty (
+        "detectorFormat", "decibels");
+
+    data->setProperty (
+        "effectiveTargetFormat", "decibels");
 
     data->setProperty ("hasAnalysis", true);
 
