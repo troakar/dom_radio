@@ -1,0 +1,115 @@
+:root {
+    /* ================================================================
+       Artboard
+       ================================================================ */
+
+    --artboard-width: 960px;
+    --artboard-height: 455px;
+    --ui-scale: 1;
+
+    /* ================================================================
+       Mechlabor STM-610 industrial palette
+       ================================================================ */
+
+    --body-black: #080807;
+    --panel-black: #11110f;
+    --panel-black-soft: #1a1a17;
+    --panel-black-light: #292925;
+
+    --chassis-metal-dark: #5d5c56;
+    --chassis-metal: #949189;
+    --chassis-metal-light: #c7c3b8;
+    --chassis-metal-highlight: #e4e0d4;
+
+    --plate-grey-dark: #343431;
+    --plate-grey: #5e5d57;
+    --plate-grey-light: #8f8c84;
+
+    --ink: #141412;
+    --ink-soft: #4e4b44;
+
+    --text-main: #eeeadd;
+    --text-secondary: #aaa497;
+    --text-value: #e5decb;
+    --text-dark: #181715;
+    --text-dim: #7a7770;
+
+    --label-cream: #e5decb;
+    --label-dim: #a8a292;
+
+    --accent-red: #b62920;
+    --accent-red-bright: #e54134;
+    --accent-red-dark: #63130f;
+
+    --accent-amber: #d6af55;
+    --accent-amber-bright: #f0d479;
+
+    --led-green: #89ca71;
+    --led-red: #e43b2f;
+
+    --screen-red: #df342d;
+    --screen-red-glow: rgba(230, 55, 42, 0.72);
+
+    /*
+       Aliases required by shared component CSS
+    */
+    --chassis-base: #292925;
+    --chassis-accent: #b62920;
+    --chassis-dark: #11110f;
+    --panel-border-thick: #080807;
+    --panel-divider: #2a2927;
+
+    /*
+       Border sizes (shared component CSS)
+    */
+    --border-thin: 1px;
+    --border-medium: 2px;
+    --border-thick: 3px;
+    --border-extra-thick: 4px;
+
+    /*
+       Knob styling (shared component CSS)
+    */
+    --knob-body: #353431;
+    --knob-body-highlight: #484743;
+    --knob-skirt: #2a2926;
+    --knob-pointer: #e6523f;
+    --knob-pointer-glow: rgba(230, 82, 63, 0.8);
+    --knob-center: #20201e;
+    --knob-shadow: rgba(0, 0, 0, 0.9);
+    --knob-tick-major: #e5decb;
+    --knob-tick-minor: #4e4b44;
+
+    /*
+       Knob sizes — scaled for 960px artboard
+       Original Troakar used 52/72/92px for 1300px artboard.
+       Scaling to 73% gives 38/53/67px.
+    */
+    --knob-small: 50px;
+    --knob-medium: 62px;
+    --knob-big: 74px;
+
+    /*
+       Fonts
+    */
+    --font-technical:
+        "GOST Type B",
+        "Courier New",
+        monospace;
+
+    --font-display:
+        "Russo One",
+        "Arial Black",
+        Impact,
+        sans-serif;
+
+    --font-system:
+        Arial,
+        Helvetica,
+        sans-serif;
+
+    --font-mono:
+        "GOST Type B",
+        "Courier New",
+        monospace;
+}

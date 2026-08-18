@@ -9,7 +9,8 @@ juce_add_plugin(DomRadioMaster
     PLUGIN_MANUFACTURER_CODE "TRKR"
     PLUGIN_CODE "DomM"
     FORMATS VST3 AU Standalone
-    PRODUCT_NAME "DOM RADIO MASTER"
+    PRODUCT_NAME "DOM RADIO MECHLABOR 610"
+    NEEDS_WEBVIEW2 TRUE
 )
 
 if(ENABLE_ASAN)
@@ -19,13 +20,26 @@ endif()
 
 juce_generate_juce_header(DomRadioMaster)
 
+# Web UI assets (HTML, CSS, JS, fonts) — collected before binary data
+file(GLOB_RECURSE WEB_ASSETS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Web/index.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Web/css/*.css"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Web/css/components/*.css"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Web/js/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Web/js/components/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Web/js/models/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Web/js/config/*.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Web/fonts/*"
+)
+
 juce_add_binary_data(DomRadioMasterBinaryData
     NAMESPACE BinaryData
     SOURCES
-    ${CMAKE_SOURCE_DIR}/Shared/noises/noise_mid_velvet_and_soft.mp3
-    ${CMAKE_SOURCE_DIR}/Shared/noises/noise_high_vinyl_like.mp3
-    ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/GOSTtypeB.ttf
-    ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/RussoOne-Regular.ttf
+        ${CMAKE_SOURCE_DIR}/Shared/noises/noise_mid_velvet_and_soft.mp3
+        ${CMAKE_SOURCE_DIR}/Shared/noises/noise_high_vinyl_like.mp3
+        ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/GOSTtypeB.ttf
+        ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/RussoOne-Regular.ttf
+        ${WEB_ASSETS}
 )
 
 target_include_directories(DomRadioMaster PRIVATE
@@ -53,11 +67,15 @@ target_sources(DomRadioMaster PRIVATE
 
 target_compile_definitions(DomRadioMaster PRIVATE
     JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_WEB_BROWSER=1
+    JUCE_USE_WIN_WEBVIEW2=1
+    JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
 )
 
 target_link_libraries(DomRadioMaster PRIVATE
     juce::juce_audio_utils
     juce::juce_dsp
+    juce::juce_gui_extra
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
     DomRadioMasterBinaryData

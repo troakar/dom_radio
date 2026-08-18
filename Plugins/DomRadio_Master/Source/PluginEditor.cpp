@@ -1,360 +1,642 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-DomRadioMasterAudioProcessorEditor::DomRadioMasterAudioProcessorEditor(DomRadioMasterAudioProcessor& p)
-    : AudioProcessorEditor(&p), audioProcessor(p),
-      satIndicator(p), vuMeter(p), eqGraph(p)
+namespace
 {
-    setLookAndFeel(&customLookAndFeel);
+    juce::File getWebView2DataFolder()
+    {
+        auto folder =
+            juce::File::getSpecialLocation (
+                juce::File::userApplicationDataDirectory)
+            .getChildFile ("domradio.audio")
+            .getChildFile ("DomRadioMaster")
+            .getChildFile ("WebView2");
 
-    setSize(960, 640);
+        folder.createDirectory();
+        return folder;
+    }
 
-    addAndMakeVisible(tmtModeCombo);
-    tmtModeCombo.addItemList({"Calibrated (OFF)", "Typical", "Loose", "Vintage"}, 1);
-    tmtModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "TMT_MODE", tmtModeCombo);
+    constexpr int logicalEditorWidth  = 960;
+    constexpr int logicalEditorHeight = 455;
 
-    addAndMakeVisible(oversamplingCombo);
-    oversamplingCombo.addItemList({"1x (Off)", "2x", "4x", "8x"}, 1);
-    oversamplingAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "ONLINE_OS", oversamplingCombo);
-
-    addAndMakeVisible(inGainKnob);
-    addAndMakeVisible(driveTypeCombo);
-    driveTypeCombo.addItemList({"Silicon", "Germanium"}, 1);
-    driveTypeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "DRIVE_TYPE", driveTypeCombo);
-
-    addAndMakeVisible(inLinkButton);
-    inLinkButton.setClickingTogglesState(true);
-    inLinkButton.onClick = [this] { handleLinkButton(); };
-
-    addAndMakeVisible(preDriveKnob);
-    addAndMakeVisible(tapeDriveKnob);
-    addAndMakeVisible(slewKnob);
-    addAndMakeVisible(satIndicator);
-    addAndMakeVisible(vuMeter);
-
-    addAndMakeVisible(tapeSpeedKnob);
-    addAndMakeVisible(eqStdCombo);
-    eqStdCombo.addItemList({"CCIR", "NAB"}, 1);
-    eqStdAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "EQ_STD", eqStdCombo);
-
-    addAndMakeVisible(tapeModelCombo);
-    tapeModelCombo.addItemList({"SVEMA A4409", "ORWO TYP 106", "SCOTCH 2500 HAEG", "BASF SPR 50 LHL"}, 1);
-    tapeModelAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "TAPE_MODEL", tapeModelCombo);
-
-    addAndMakeVisible(airKnob);
-    addAndMakeVisible(biasKnob);
-    addAndMakeVisible(decayKnob);
-
-    addAndMakeVisible(mixKnob);
-    addAndMakeVisible(outLvlKnob);
-    addAndMakeVisible(ironCoreKnob);
-    addAndMakeVisible(detailAmountKnob);
-    addAndMakeVisible(detailTiltKnob);
-    
-    addAndMakeVisible(detailAlgoCombo);
-    detailAlgoCombo.addItemList({"Wideband Tilt", "Multiband Spectral"}, 1);
-    detailAlgoAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "DETAIL_ALGO", detailAlgoCombo);
-    
-    addAndMakeVisible(outLinkButton);
-    outLinkButton.setClickingTogglesState(true);
-    outLinkButton.onClick = [this] { handleLinkButton(); };
-
-    inGainKnob.slider.addListener(this);
-    outLvlKnob.slider.addListener(this);
-
-    addAndMakeVisible(archiveToggleButton);
-    archiveToggleButton.setClickingTogglesState(true);
-    archiveToggleButton.onClick = [this] { archiveExpanded = archiveToggleButton.getToggleState(); audioProcessor.archiveExpanded = archiveExpanded; updateArchiveVisibility(); updateWindowSize(); };
-
-    addAndMakeVisible(temperatureSlider);
-    temperatureSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    temperatureSlider.setPopupDisplayEnabled(true, true, nullptr);
-    temperatureAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.apvts, "TEMPERATURE", temperatureSlider);
-
-    addAndMakeVisible(ageKnob);
-    addAndMakeVisible(oxideKnob);
-    addAndMakeVisible(azimuthKnob);
-    addAndMakeVisible(biasSagKnob);
-    addAndMakeVisible(scrapeKnob);
-    addAndMakeVisible(crosstalkKnob);
-    addAndMakeVisible(wowKnob);
-    addAndMakeVisible(flutterKnob);
-    addAndMakeVisible(tapeNoiseKnob);
-    addAndMakeVisible(humKnob);
-
-    addAndMakeVisible(noiseModeCombo);
-    noiseModeCombo.addItemList({"Off", "Static", "Dynamic"}, 1);
-    noiseModeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "NOISE_MODE", noiseModeCombo);
-
-    addAndMakeVisible(eqMonitorToggleButton);
-    eqMonitorToggleButton.setClickingTogglesState(true);
-    eqMonitorToggleButton.onClick = [this] { eqMonitorExpanded = eqMonitorToggleButton.getToggleState(); audioProcessor.eqMonitorExpanded = eqMonitorExpanded; updateEqVisibility(); updateWindowSize(); };
-
-    addAndMakeVisible(bassKnob);
-    addAndMakeVisible(trebleKnob);
-    addAndMakeVisible(bassFreqKnob);
-    addAndMakeVisible(trebleFreqKnob);
-    addAndMakeVisible(eqGraph);
-
-    eqMonitorExpanded = audioProcessor.eqMonitorExpanded;
-    archiveExpanded = audioProcessor.archiveExpanded;
-    eqMonitorToggleButton.setToggleState(eqMonitorExpanded, juce::dontSendNotification);
-    archiveToggleButton.setToggleState(archiveExpanded, juce::dontSendNotification);
-
-    updateArchiveVisibility();
-    updateEqVisibility();
-    updateWindowSize();
+    constexpr int minEditorWidth  = logicalEditorWidth / 2;
+    constexpr int minEditorHeight = logicalEditorHeight / 2;
+    constexpr int maxEditorWidth  = logicalEditorWidth * 2;
+    constexpr int maxEditorHeight = logicalEditorHeight * 3;
 }
 
-DomRadioMasterAudioProcessorEditor::~DomRadioMasterAudioProcessorEditor() { setLookAndFeel(nullptr); }
+// ============================================================================
+// Constructor
+// ============================================================================
 
-void DomRadioMasterAudioProcessorEditor::handleLinkButton() {
-    inOutLinked = !inOutLinked;
-    inLinkButton.setToggleState(inOutLinked, juce::dontSendNotification);
-    outLinkButton.setToggleState(inOutLinked, juce::dontSendNotification);
-    if (inOutLinked)
-        inOutSum = inGainKnob.slider.getValue() + outLvlKnob.slider.getValue();
-}
-
-void DomRadioMasterAudioProcessorEditor::sliderValueChanged(juce::Slider* slider)
+DomRadioMasterAudioProcessorEditor::
+DomRadioMasterAudioProcessorEditor (
+    DomRadioMasterAudioProcessor& p)
+    : AudioProcessorEditor (&p),
+      audioProcessor (p)
 {
-    if (isUpdatingLink || ! inOutLinked) return;
+    using WebBrowser = juce::WebBrowserComponent;
+    using Options = WebBrowser::Options;
 
-    if (slider == &inGainKnob.slider)
+    auto options = Options {}
+        .withBackend (Options::Backend::webview2)
+        .withWinWebView2Options (
+            Options::WinWebView2{}
+                .withUserDataFolder (getWebView2DataFolder()))
+        .withNativeIntegrationEnabled()
+        .withResourceProvider (
+            [this] (const juce::String& path)
+            {
+                return getResource (path);
+            })
+
+        // =================================================================
+        // JavaScript -> APVTS: parameter change
+        // =================================================================
+        .withNativeFunction (
+            "paramChange",
+            [this] (
+                const juce::Array<juce::var>& args,
+                auto complete)
+            {
+                if (args.size() >= 2)
+                {
+                    const auto parameterID =
+                        args[0].toString();
+
+                    const auto normalizedValue =
+                        juce::jlimit (
+                            0.0f,
+                            1.0f,
+                            static_cast<float> (args[1]));
+
+                    if (auto* parameter =
+                            audioProcessor.apvts.getParameter (
+                                parameterID))
+                    {
+                        parameter->setValueNotifyingHost (
+                            normalizedValue);
+                    }
+                }
+
+                complete ({});
+            })
+
+        // =================================================================
+        // JavaScript -> APVTS: read normalized parameter value
+        // =================================================================
+        .withNativeFunction (
+            "getParameter",
+            [this] (
+                const juce::Array<juce::var>& args,
+                auto complete)
+            {
+                if (args.size() >= 1)
+                {
+                    const auto parameterID =
+                        args[0].toString();
+
+                    if (auto* parameter =
+                            audioProcessor.apvts.getParameter (
+                                parameterID))
+                    {
+                        complete (
+                            juce::var (
+                                parameter->getValue()));
+                        return;
+                    }
+                }
+
+                complete (0.0f);
+            })
+
+        // =================================================================
+        // Automation gesture begin
+        // =================================================================
+        .withNativeFunction (
+            "beginGesture",
+            [this] (
+                const juce::Array<juce::var>& args,
+                auto complete)
+            {
+                if (args.size() >= 1)
+                {
+                    const auto parameterID =
+                        args[0].toString();
+
+                    if (auto* parameter =
+                            audioProcessor.apvts.getParameter (
+                                parameterID))
+                    {
+                        parameter->beginChangeGesture();
+                    }
+                }
+
+                complete ({});
+            })
+
+        // =================================================================
+        // Automation gesture end
+        // =================================================================
+        .withNativeFunction (
+            "endGesture",
+            [this] (
+                const juce::Array<juce::var>& args,
+                auto complete)
+            {
+                if (args.size() >= 1)
+                {
+                    const auto parameterID =
+                        args[0].toString();
+
+                    if (auto* parameter =
+                            audioProcessor.apvts.getParameter (
+                                parameterID))
+                    {
+                        parameter->endChangeGesture();
+                    }
+                }
+
+                complete ({});
+            })
+
+        // =================================================================
+        // Dynamic Window Resize for Drawers
+        // =================================================================
+        .withNativeFunction (
+            "setLogicalSize",
+            [this] (
+                const juce::Array<juce::var>& args,
+                auto complete)
+            {
+                if (args.size() >= 2)
+                {
+                    const int logicalW =
+                        static_cast<int> (args[0]);
+
+                    const int logicalH =
+                        static_cast<int> (args[1]);
+
+                    juce::MessageManager::callAsync (
+                        [this, logicalW, logicalH]()
+                        {
+                            // Обновляем замок пропорций для окна DAW
+                            if (auto* constrainer =
+                                    getConstrainer())
+                            {
+                                constrainer->setFixedAspectRatio (
+                                    static_cast<double> (logicalW)
+                                        / static_cast<double> (logicalH));
+                            }
+
+                            // Мгновенно подгоняем высоту окна DAW
+                            // под текущую ширину
+                            int currentWidth = getWidth();
+
+                            int newHeight = juce::roundToInt (
+                                currentWidth * (static_cast<double> (logicalH)
+                                                / static_cast<double> (logicalW)));
+
+                            setSize (currentWidth, newHeight);
+                        });
+                }
+
+                complete ({});
+            });
+
+    webView = std::make_unique<WebBrowser> (options);
+    addAndMakeVisible (*webView);
+
+    /*
+        Подписываемся на все APVTS параметры.
+
+        Это необходимо, чтобы Web UI обновлялся не только от
+        собственных действий пользователя, но и от:
+        - automation DAW;
+        - восстановления preset/state;
+        - изменений параметров из host;
+        - внутренних ParameterAttachment.
+    */
+    for (auto* parameter :
+         audioProcessor.apvts.processor.getParameters())
     {
-        isUpdatingLink = true;
-        double targetOut = inOutSum - inGainKnob.slider.getValue();
-        targetOut = juce::jlimit(outLvlKnob.slider.getMinimum(),
-                                 outLvlKnob.slider.getMaximum(), targetOut);
-        outLvlKnob.slider.setValue(targetOut, juce::sendNotificationSync);
-        inOutSum = inGainKnob.slider.getValue() + outLvlKnob.slider.getValue();
-        isUpdatingLink = false;
+        if (auto* parameterWithID =
+                dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+        {
+            audioProcessor.apvts.addParameterListener (
+                parameterWithID->paramID,
+                this);
+        }
     }
-    else if (slider == &outLvlKnob.slider)
+
+    webView->goToURL (
+        WebBrowser::getResourceProviderRoot());
+
+    /*
+        Window geometry.
+
+        Web frontend uses a logical 960px-wide artboard whose
+        height varies based on open Archive/EQ drawers.
+        CSS scale() handles proportional resizing.
+
+        No fixed aspect ratio — height grows dynamically
+        when drawers are opened (JS notifies C++ via
+        setEditorHeight bridge in Stage 3).
+    */
+    setResizable (true, true);
+
+    setResizeLimits (
+        minEditorWidth,
+        minEditorHeight,
+        maxEditorWidth,
+        maxEditorHeight);
+
+    /*
+        Блокируем пропорции на старте.
+        Высота далее управляется через web layout + drawer toggles,
+        а пропорции окна DAW синхронизируются динамически через
+        setLogicalSize bridge из JS.
+    */
+    if (auto* constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio (
+            static_cast<double> (logicalEditorWidth)
+                / logicalEditorHeight);
+
+    /*
+        Restore saved window size from processor state.
+        Защита от кривого стейта: гарантируем, что плагин
+        откроется минимум 960x455.
+    */
+    auto savedSize = audioProcessor.getEditorSize();
+
+    int startWidth =
+        juce::jmax (
+            logicalEditorWidth,
+            savedSize.x);
+
+    int startHeight =
+        juce::jmax (
+            logicalEditorHeight,
+            savedSize.y);
+
+    setSize (startWidth, startHeight);
+
+    /*
+        Таймер нужен:
+        - для установки browser context-menu защиты;
+        - для metering/analysis telemetry (30 Гц).
+    */
+    startTimerHz (30);
+}
+
+// ============================================================================
+// Destructor
+// ============================================================================
+
+DomRadioMasterAudioProcessorEditor::
+~DomRadioMasterAudioProcessorEditor()
+{
+    stopTimer();
+
+    for (auto* parameter :
+         audioProcessor.apvts.processor.getParameters())
     {
-        isUpdatingLink = true;
-        double targetIn = inOutSum - outLvlKnob.slider.getValue();
-        targetIn = juce::jlimit(inGainKnob.slider.getMinimum(),
-                                inGainKnob.slider.getMaximum(), targetIn);
-        inGainKnob.slider.setValue(targetIn, juce::sendNotificationSync);
-        inOutSum = inGainKnob.slider.getValue() + outLvlKnob.slider.getValue();
-        isUpdatingLink = false;
+        if (auto* parameterWithID =
+                dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
+        {
+            audioProcessor.apvts.removeParameterListener (
+                parameterWithID->paramID,
+                this);
+        }
     }
+
+    webView.reset();
 }
 
-void DomRadioMasterAudioProcessorEditor::updateWindowSize() {
-    // 15 (верх) + 50 (шапка) + 10 (зазор) + 295 (верхние панели) + 10 (зазор) + 24 (полоса кнопок) + 15 (низ) = 419px
-    int height = 419;
-    if (eqMonitorExpanded) height += 155 + 12;
-    if (archiveExpanded)   height += 145 + 12;
-    setSize(960, height);
-}
+// ============================================================================
+// Component
+// ============================================================================
 
-void DomRadioMasterAudioProcessorEditor::updateArchiveVisibility() {
-    const bool v = archiveExpanded;
-    for (auto* comp : {&ageKnob, &oxideKnob, &azimuthKnob, &biasSagKnob, &scrapeKnob,
-                       &crosstalkKnob, &wowKnob, &flutterKnob, &tapeNoiseKnob, &humKnob})
-        comp->setVisible(v);
-    noiseModeCombo.setVisible(v);
-    temperatureSlider.setVisible(v);
-}
-
-void DomRadioMasterAudioProcessorEditor::updateEqVisibility() {
-    const bool v = eqMonitorExpanded;
-    bassKnob.setVisible(v);
-    trebleKnob.setVisible(v);
-    bassFreqKnob.setVisible(v);
-    trebleFreqKnob.setVisible(v);
-    eqGraph.setVisible(v);
+void DomRadioMasterAudioProcessorEditor::paint (
+    juce::Graphics& /*graphics*/)
+{
+    /*
+        Фон заметен только до загрузки WebView либо в случае
+        временной ошибки embedded browser.
+    */
+    // Intentionally empty for Stage 1
 }
 
 void DomRadioMasterAudioProcessorEditor::resized()
 {
-    auto bounds = getLocalBounds().reduced(15, 15);
-    
-    headerRect = bounds.removeFromTop(50);
-    bounds.removeFromTop(10);
-    
-    // 1. Верхние 3 панели увеличены до 295px (как в Track)
-    auto mainPanels = bounds.removeFromTop(295);
-    int panelW = (mainPanels.getWidth() - 30) / 3;
-    
-    p1Rect = mainPanels.removeFromLeft(panelW);
-    mainPanels.removeFromLeft(15);
-    p2Rect = mainPanels.removeFromLeft(panelW);
-    mainPanels.removeFromLeft(15);
-    p3Rect = mainPanels;
-    
-    // --- БЛОК 1: INPUT & DRIVE ---
-    inGainKnob.setBounds(p1Rect.getX() + 10, p1Rect.getY() + 35, 100, 100);
-    driveTypeCombo.setBounds(p1Rect.getX() + 125, p1Rect.getY() + 45, 140, 24);
-    inLinkButton.setBounds(p1Rect.getX() + 145, p1Rect.getY() + 80, 100, 22);
-    preDriveKnob.setBounds(p1Rect.getX() + 19,  p1Rect.getY() + 145, 70, 52);
-    tapeDriveKnob.setBounds(p1Rect.getX() + 108, p1Rect.getY() + 145, 70, 52);
-    slewKnob.setBounds(p1Rect.getX() + 197,      p1Rect.getY() + 145, 70, 52);
-    satIndicator.setBounds(p1Rect.getX() + 10,  p1Rect.getY() + 208, 178, 36);
+    if (webView != nullptr)
+        webView->setBounds (getLocalBounds());
 
-    // --- БЛОК 2: TAPE & CALIBRATION ---
-    tapeSpeedKnob.setBounds(p2Rect.getX() + 10, p2Rect.getY() + 35, 100, 100);
-    eqStdCombo.setBounds(p2Rect.getX() + 125, p2Rect.getY() + 45, 140, 24);
-    airKnob.setBounds(p2Rect.getX() + 19,   p2Rect.getY() + 145, 70, 52);
-    biasKnob.setBounds(p2Rect.getX() + 108,  p2Rect.getY() + 145, 70, 52);
-    decayKnob.setBounds(p2Rect.getX() + 197, p2Rect.getY() + 145, 70, 52);
-    tapeModelCombo.setBounds(p2Rect.getX() + 19, p2Rect.getY() + 206, 248, 24);
-
-    // --- БЛОК 3: OUTPUT & METERING ---
-    mixKnob.setBounds(p3Rect.getX() + 10,  p3Rect.getY() + 32, 62, 60);
-    outLvlKnob.setBounds(p3Rect.getX() + 77, p3Rect.getY() + 32, 62, 60);
-    detailAmountKnob.setBounds(p3Rect.getX() + 144, p3Rect.getY() + 32, 62, 60);
-    detailTiltKnob.setBounds(p3Rect.getX() + 211, p3Rect.getY() + 32, 62, 60);
-    detailAlgoCombo.setBounds(p3Rect.getX() + 10, p3Rect.getY() + 98, 120, 22);
-    outLinkButton.setBounds(p3Rect.getX() + 135, p3Rect.getY() + 98, 50, 22);
-    ironCoreKnob.setBounds(p3Rect.getX() + 192, p3Rect.getY() + 90, 82, 45); 
-    vuMeter.setBounds(p3Rect.getX() + 15, p3Rect.getY() + 140, p3Rect.getWidth() - 30, 92); 
-
-    // Элементы хедера
-    oversamplingCombo.setBounds(headerRect.getRight() - 220, headerRect.getY() + 13, 95, 24); 
-    tmtModeCombo.setBounds(headerRect.getRight() - 115, headerRect.getY() + 13, 105, 24); 
-
-    // 2. Выделенный зазор под кнопками переключения
-    bounds.removeFromTop(10);
-    auto buttonRow = bounds.removeFromTop(24);
-    archiveToggleButton.setBounds(p1Rect.getX(), buttonRow.getY(), 145, 24);
-    eqMonitorToggleButton.setBounds(p3Rect.getRight() - 145, buttonRow.getY(), 145, 24);
-
-    // 3. Выпадающие панели со сдвигом вниз
-    if (eqMonitorExpanded) {
-        bounds.removeFromTop(12);
-        eqRect = bounds.removeFromTop(155);
-        
-        bassKnob.setBounds(eqRect.getX() + 15, eqRect.getY() + 15, 75, 62);
-        trebleKnob.setBounds(eqRect.getX() + 95, eqRect.getY() + 15, 75, 62);
-        bassFreqKnob.setBounds(eqRect.getX() + 15, eqRect.getY() + 82, 75, 62);
-        trebleFreqKnob.setBounds(eqRect.getX() + 95, eqRect.getY() + 82, 75, 62);
-        eqGraph.setBounds(eqRect.getX() + 180, eqRect.getY() + 15, eqRect.getWidth() - 195, 125);
-    }
-    
-    if (archiveExpanded) {
-        bounds.removeFromTop(12);
-        archiveRect = bounds.removeFromTop(145);
-        
-        const int kY = archiveRect.getY() + 15;
-        const int kW = 62; const int kH = 65; const int kStep = 75;
-
-        ageKnob.setBounds(archiveRect.getX() + 10 + 0 * kStep, kY, kW, kH);
-        oxideKnob.setBounds(archiveRect.getX() + 10 + 1 * kStep, kY, kW, kH);
-        azimuthKnob.setBounds(archiveRect.getX() + 10 + 2 * kStep, kY, kW, kH);
-        biasSagKnob.setBounds(archiveRect.getX() + 10 + 3 * kStep, kY, kW, kH);
-        scrapeKnob.setBounds(archiveRect.getX() + 10 + 4 * kStep, kY, kW, kH);
-        crosstalkKnob.setBounds(archiveRect.getX() + 10 + 5 * kStep, kY, kW, kH);
-        wowKnob.setBounds(archiveRect.getX() + 10 + 6 * kStep, kY, kW, kH);
-        flutterKnob.setBounds(archiveRect.getX() + 10 + 7 * kStep, kY, kW, kH);
-        tapeNoiseKnob.setBounds(archiveRect.getX() + 10 + 8 * kStep, kY, kW, kH);
-        humKnob.setBounds(archiveRect.getX() + 10 + 9 * kStep, kY, kW, kH);
-        noiseModeCombo.setBounds(archiveRect.getX() + 10 + 10 * kStep, kY + 20, 105, 24);
-        temperatureSlider.setBounds(archiveRect.getX() + 15, archiveRect.getY() + 100, archiveRect.getWidth() - 30, 24);
-    }
+    /*
+        Сообщаем процессору актуальный размер для сохранения
+        в state/preset.
+    */
+    audioProcessor.setEditorSize (getWidth(), getHeight());
 }
 
-void DomRadioMasterAudioProcessorEditor::paint(juce::Graphics& g)
+// ============================================================================
+// APVTS -> JavaScript
+// ============================================================================
+
+void DomRadioMasterAudioProcessorEditor::parameterChanged (
+    const juce::String& parameterID,
+    float /*newValue*/)
 {
-    // Фоновая текстура бежевого пластика СССР
-    g.fillAll(juce::Colour::fromRGB(225, 220, 208));
+    if (webView == nullptr)
+        return;
 
-    const juce::Colour textCol = juce::Colour::fromRGB(25, 25, 25);
-    const juce::Colour darkShadow = juce::Colour::fromRGB(125, 120, 110);
-    const juce::Colour lightHighlight = juce::Colour::fromRGB(255, 255, 248);
+    auto* parameter =
+        audioProcessor.apvts.getParameter (
+            parameterID);
 
-    auto draw3DPanel = [&](juce::Rectangle<float> bounds) {
-        g.setColour(juce::Colour::fromRGB(216, 211, 198));
-        g.fillRoundedRectangle(bounds, 5.0f);
+    if (parameter == nullptr)
+        return;
 
-        g.setColour(darkShadow);
-        g.drawRoundedRectangle(bounds, 5.0f, 1.0f);
+    /*
+        JavaScript получает только normalized APVTS value: 0...1.
 
-        g.setColour(lightHighlight);
-        g.drawRoundedRectangle(bounds.translated(0.5f, 1.0f), 5.0f, 0.8f);
-    };
+        Это важно, поскольку frontend сам интерпретирует реальные
+        диапазоны параметров, unit, skew и формат отображения.
+    */
+    const auto normalizedValue =
+        juce::jlimit (
+            0.0f,
+            1.0f,
+            parameter->getValue());
 
-    auto drawScrew = [&](float x, float y) {
-        g.setColour(juce::Colour::fromRGB(45, 42, 38));
-        g.fillEllipse(x - 3.5f, y - 3.5f, 7.0f, 7.0f);
-        g.setColour(juce::Colour::fromRGB(130, 125, 115));
-        g.drawEllipse(x - 3.5f, y - 3.5f, 7.0f, 7.0f, 0.8f);
-        g.setColour(juce::Colour::fromRGB(25, 25, 25));
-        g.drawLine(x - 2.5f, y - 1.0f, x + 2.5f, y + 1.0f, 1.2f);
-    };
+    juce::Component::SafePointer<
+        DomRadioMasterAudioProcessorEditor> safeThis (this);
 
-    auto draw3DPanelWithScrews = [&](juce::Rectangle<float> bounds) {
-        draw3DPanel(bounds);
-        drawScrew(bounds.getX() + 8.0f, bounds.getY() + 8.0f);
-        drawScrew(bounds.getRight() - 8.0f, bounds.getY() + 8.0f);
-        drawScrew(bounds.getX() + 8.0f, bounds.getBottom() - 8.0f);
-        drawScrew(bounds.getRight() - 8.0f, bounds.getBottom() - 8.0f);
-    };
+    juce::MessageManager::callAsync (
+        [safeThis, parameterID, normalizedValue]()
+        {
+            if (safeThis == nullptr ||
+                safeThis->webView == nullptr)
+            {
+                return;
+            }
 
-    // =========================================================================
-    // ВЕРХНЯЯ ШИРОКАЯ ПАНЕЛЬ-ШАССИ (HEADER PLATE)
-    // =========================================================================
-    g.setColour(juce::Colour::fromRGB(38, 36, 32));
-    g.fillRoundedRectangle(headerRect.toFloat(), 4.0f);
-    g.setColour(darkShadow);
-    g.drawRoundedRectangle(headerRect.toFloat(), 4.0f, 1.0f);
+            auto* data =
+                new juce::DynamicObject();
 
-    auto badgeBounds = juce::Rectangle<float>(headerRect.getX() + 10.0f, headerRect.getY() + 12.0f, 78.0f, 26.0f);
-    g.setColour(juce::Colour::fromRGB(165, 30, 30));
-    g.fillRoundedRectangle(badgeBounds, 3.0f);
-    g.setColour(juce::Colour::fromRGB(220, 180, 60));
-    g.drawRoundedRectangle(badgeBounds, 3.0f, 1.2f);
-    
-    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    g.setColour(juce::Colour::fromRGB(255, 240, 200));
-    g.drawText(juce::CharPointer_UTF8("\xe2\x98\x85 \xd0\xa1\xd0\xa1\xd0\xa1\xd0\xa0"), badgeBounds.toNearestInt(), juce::Justification::centred, false);
+            data->setProperty (
+                "id",
+                parameterID);
 
-    g.setFont(customLookAndFeel.getHeaderFont(24.0f));
-    g.setColour(juce::Colour::fromRGB(245, 240, 225));
-    g.drawText("D O M   R A D I O", juce::Rectangle<int>(headerRect.getX() + 100, headerRect.getY() + 8, 300, 24), juce::Justification::left, false);
+            data->setProperty (
+                "value",
+                normalizedValue);
 
-    g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
-    g.setColour(juce::Colour::fromRGB(190, 185, 170));
-    g.drawText(juce::CharPointer_UTF8("\xd0\x9c\xd0\xb0\xd0\xb5\xd1\x81\xd1\x82\xd1\x80\xd0\xbe-\xd0\xbc\xd0\xb0\xd0\xb3\xd0\xbd\xd0\xb8\xd1\x82\xd0\xbe\xd1\x84\xd0\xbe\xd0\xbd \xe2\x80\xa2 \xd0\x9c\xd0\xb0\xd1\x85\xd0\xb0\xd1\x87\xd0\xba\xd0\xb0\xd0\xbb\xd0\xb0 1978 \xe2\x80\xa2 \xd0\x93\xd0\x9e\xd0\xa1\xd0\xa2 20838-75"), juce::Rectangle<int>(headerRect.getX() + 101, headerRect.getY() + 30, 450, 14), juce::Justification::left, false);
+            safeThis->webView
+                ->emitEventIfBrowserIsVisible (
+                    "paramUpdate",
+                    juce::var (data));
+        });
+}
 
-    drawScrew(headerRect.getX() + 6.0f, headerRect.getCentreY());
-    drawScrew(headerRect.getRight() - 6.0f, headerRect.getCentreY());
+// ============================================================================
+// Timer
+// ============================================================================
 
-    draw3DPanelWithScrews(p1Rect.toFloat());
-    draw3DPanelWithScrews(p2Rect.toFloat());
-    draw3DPanelWithScrews(p3Rect.toFloat());
+void DomRadioMasterAudioProcessorEditor::timerCallback()
+{
+    if (webView == nullptr)
+        return;
 
-    g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
-    g.setColour(textCol);
-    g.drawText("1. INPUT & DRIVE", juce::Rectangle<int>(p1Rect.getX() + 5, p1Rect.getY() + 16, 280, 16), juce::Justification::left, false);
-    g.drawText("2. TAPE & CALIBRATION", juce::Rectangle<int>(p2Rect.getX() + 5, p2Rect.getY() + 16, 300, 16), juce::Justification::left, false);
-    g.drawText("3. OUTPUT & METERING", juce::Rectangle<int>(p3Rect.getX() + 5, p3Rect.getY() + 16, 320, 16), juce::Justification::left, false);
+    /*
+        WebView2 может показывать нативное context menu поверх
+        интерфейса. В финальном UI правый клик будет использоваться
+        только если понадобится контекстное действие; сейчас
+        блокируем стандартное browser menu.
+    */
+    if (! contextMenuGuardInjected)
+    {
+        webView->evaluateJavascript (
+            R"JS(
+                (function () {
+                    function blockContextMenu (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
 
-    g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
-    auto drawLabelAbove = [&](juce::Component& comp, const juce::String& text, int widthOffset = 20) {
-        if (comp.isVisible()) {
-            int x = comp.getX() - widthOffset / 2;
-            int y = comp.getY() - 16;
-            int w = comp.getWidth() + widthOffset;
-            g.drawText(text, juce::Rectangle<int>(x, y, w, 14), juce::Justification::centred, false);
+                        if (event.stopImmediatePropagation)
+                            event.stopImmediatePropagation();
+
+                        return false;
+                    }
+
+                    document.addEventListener(
+                        'contextmenu',
+                        blockContextMenu,
+                        true
+                    );
+
+                    window.addEventListener(
+                        'contextmenu',
+                        blockContextMenu,
+                        true
+                    );
+
+                    document.oncontextmenu =
+                        function () { return false; };
+
+                    document.body.oncontextmenu =
+                        function () { return false; };
+                })();
+            )JS");
+
+        contextMenuGuardInjected = true;
+    }
+
+    /*
+        Телеметрия в Web UI: VU meter + saturation indicators.
+        Emit событие "telemetry" каждый таймерный тик.
+        JS слушает через backend.addEventListener('telemetry', ...).
+    */
+    auto* telemetry = new juce::DynamicObject();
+
+    const float vuLeft =
+        audioProcessor.getMeterLevelLeft();
+
+    const float vuRight =
+        audioProcessor.getMeterLevelRight();
+
+    telemetry->setProperty (
+        "vuMeter",
+        juce::jmax (vuLeft, vuRight));
+
+    telemetry->setProperty (
+        "satInput",
+        audioProcessor.getInputSaturationLevel());
+
+    telemetry->setProperty (
+        "satTape",
+        audioProcessor.getTapeSaturationLevel());
+
+    webView->emitEventIfBrowserIsVisible (
+        "telemetry",
+        juce::var (telemetry));
+}
+
+// ============================================================================
+// Resource provider
+// ============================================================================
+
+std::optional<juce::WebBrowserComponent::Resource>
+DomRadioMasterAudioProcessorEditor::getResource (
+    const juce::String& requestedPath)
+{
+    auto path = requestedPath
+        .upToFirstOccurrenceOf ("?", false, false)
+        .upToFirstOccurrenceOf ("#", false, false)
+        .replaceCharacter ('\\', '/');
+
+    while (path.startsWithChar ('/'))
+        path = path.substring (1);
+
+    if (path.isEmpty())
+        path = "index.html";
+
+    /*
+        Basic traversal protection.
+    */
+    if (path.contains (".."))
+        return std::nullopt;
+
+    // Имя файла из URL: css/components/chicken-knob.css -> chicken-knob.css
+    auto fileName =
+        path.fromLastOccurrenceOf ("/", false, false);
+
+    const char* data = nullptr;
+    int dataSize = 0;
+    juce::String matchedResource;
+
+    // Сначала пробуем точное имя ресурса (filename.sanitized)
+    auto expectedName =
+        fileName
+            .replaceCharacter ('.', '_')
+            .replaceCharacter ('-', '_')
+            .replaceCharacter (' ', '_');
+
+    data = BinaryData::getNamedResource (
+        expectedName.toRawUTF8(),
+        dataSize);
+
+    if (data != nullptr && dataSize > 0)
+    {
+        matchedResource = expectedName;
+    }
+    else
+    {
+        // Fallback: ищем по originalFilenames
+        for (int i = 0;
+             i < BinaryData::namedResourceListSize; ++i)
+        {
+            if (BinaryData::originalFilenames[i] != nullptr)
+            {
+                auto originalPath =
+                    juce::String (
+                        BinaryData::originalFilenames[i]);
+
+                auto originalFileName =
+                    originalPath.fromLastOccurrenceOf (
+                        "/", false, false);
+
+                if (originalFileName.equalsIgnoreCase (
+                        fileName))
+                {
+                    auto resourceName =
+                        juce::String (
+                            BinaryData::namedResourceList[i]);
+
+                    data = BinaryData::getNamedResource (
+                        resourceName.toRawUTF8(),
+                        dataSize);
+
+                    matchedResource = resourceName;
+                    break;
+                }
+            }
         }
-    };
-    drawLabelAbove(driveTypeCombo, "DRIVE TYPE");
-    drawLabelAbove(eqStdCombo, "EQ STD");
-    drawLabelAbove(tapeModelCombo, "TAPE MODEL");
-    drawLabelAbove(noiseModeCombo, "NOISE MODE");
-    drawLabelAbove(temperatureSlider, "HEAD TEMPERATURE (\u00B0C)");
 
-    if (eqMonitorExpanded) draw3DPanel(eqRect.toFloat());
-    if (archiveExpanded) draw3DPanel(archiveRect.toFloat());
+        // Второй fallback: поиск по суффиксу имени ресурса
+        if (data == nullptr || dataSize <= 0)
+        {
+            for (int i = 0;
+                 i < BinaryData::namedResourceListSize; ++i)
+            {
+                auto resName =
+                    juce::String (
+                        BinaryData::namedResourceList[i]);
+
+                if (resName.equalsIgnoreCase (expectedName))
+                {
+                    data = BinaryData::getNamedResource (
+                        resName.toRawUTF8(),
+                        dataSize);
+
+                    matchedResource = resName;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (data == nullptr || dataSize <= 0)
+    {
+        DBG ("WEB RESOURCE NOT FOUND");
+        DBG ("Requested path: " + requestedPath);
+        DBG ("Normalized path: " + path);
+        DBG ("Expected BinaryData name: " + expectedName);
+
+        DBG ("Available BinaryData resources:");
+        for (int i = 0;
+             i < BinaryData::namedResourceListSize; ++i)
+            DBG ("  " + juce::String (
+                BinaryData::namedResourceList[i]));
+
+        return std::nullopt;
+    }
+
+    juce::String mimeType =
+        "application/octet-stream";
+
+    if (path.endsWithIgnoreCase (".html"))
+        mimeType = "text/html; charset=utf-8";
+    else if (path.endsWithIgnoreCase (".css"))
+        mimeType = "text/css; charset=utf-8";
+    else if (path.endsWithIgnoreCase (".js"))
+        mimeType = "application/javascript; charset=utf-8";
+    else if (path.endsWithIgnoreCase (".json"))
+        mimeType = "application/json; charset=utf-8";
+    else if (path.endsWithIgnoreCase (".svg"))
+        mimeType = "image/svg+xml";
+    else if (path.endsWithIgnoreCase (".png"))
+        mimeType = "image/png";
+    else if (path.endsWithIgnoreCase (".jpg") ||
+             path.endsWithIgnoreCase (".jpeg"))
+        mimeType = "image/jpeg";
+    else if (path.endsWithIgnoreCase (".woff"))
+        mimeType = "font/woff";
+    else if (path.endsWithIgnoreCase (".woff2"))
+        mimeType = "font/woff2";
+    else if (path.endsWithIgnoreCase (".ttf"))
+        mimeType = "font/ttf";
+    else if (path.endsWithIgnoreCase (".otf"))
+        mimeType = "font/otf";
+
+    DBG ("Serving Web resource: " + path + " -> " + matchedResource);
+
+    std::vector<std::byte> bytes (
+        reinterpret_cast<const std::byte*> (data),
+        reinterpret_cast<const std::byte*> (data + dataSize));
+
+    return juce::WebBrowserComponent::Resource {
+        std::move (bytes),
+        mimeType
+    };
 }

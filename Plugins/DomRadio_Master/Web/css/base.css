@@ -1,0 +1,1447 @@
+/* ===================================================================
+   DOM RADIO MASTER
+   Mechlabor STM-610 static Web frontend — Stage 2
+   =================================================================== */
+
+:root {
+    --knob-small: 44px;
+    --knob-medium: 64px;
+    --knob-big: 88px;
+}
+
+* {
+    box-sizing: border-box;
+    user-select: none;
+}
+
+/* 1. Блокировка корня экрана */
+html,
+body {
+    width: 100vw !important;
+    height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #080808 !important;
+}
+
+body {
+    position: relative;
+    color: var(--text-main);
+    background: radial-gradient(ellipse at 50% 42%, #2c2b28 0%, #141412 48%, #050505 100%);
+    font-family: var(--font-technical);
+}
+
+/* 2. Артборд (Жесткое центрирование по центру окна) */
+.device-artboard {
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    width: var(--artboard-width) !important;
+    height: var(--artboard-height) !important;
+    transform-origin: center center !important;
+    transform: translate(-50%, -50%) scale(var(--ui-scale)) !important;
+    display: block;
+}
+
+/* 3. Шасси */
+.mechlabor-device {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    position: relative !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    padding: 8px 12px !important;
+    border: 3px solid #56554f;
+    border-radius: 9px;
+    background: linear-gradient(145deg, #bbb7ab 0%, #7d7b73 18%, #a4a096 45%, #68675f 78%, #bbb7ab 100%);
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.48), inset 0 -10px 22px rgba(0, 0, 0, 0.42), 0 30px 60px rgba(0, 0, 0, 0.88);
+    transition: height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+}
+
+.metal-texture {
+    position: absolute;
+    inset: 0;
+
+    z-index: 1;
+
+    opacity: 0.34;
+
+    pointer-events: none;
+
+    background:
+        repeating-linear-gradient(
+            90deg,
+            transparent 0,
+            transparent 2px,
+            rgba(0, 0, 0, 0.07) 3px
+        ),
+        repeating-linear-gradient(
+            0deg,
+            transparent 0px,
+            transparent 5px,
+            rgba(0, 0, 0, 0.035) 6px
+        );
+}
+
+.chassis-glare {
+    position: absolute;
+    inset: 0;
+
+    z-index: 2;
+
+    pointer-events: none;
+
+    background:
+        linear-gradient(
+            145deg,
+            rgba(255, 255, 255, 0.32) 0%,
+            rgba(255, 255, 255, 0.07) 21%,
+            transparent 42%
+        );
+}
+
+/* ===================================================================
+   Screws
+   =================================================================== */
+
+.chassis-screw {
+    position: absolute;
+
+    z-index: 30;
+
+    width: 14px;
+    height: 14px;
+
+    border: 1px solid #1a1917;
+    border-radius: 50%;
+
+    background:
+        radial-gradient(
+            circle at 33% 28%,
+            #d0ccc0 0%,
+            #77756e 25%,
+            #242421 72%,
+            #080807 100%
+        );
+
+    box-shadow:
+        inset 0 1px 2px rgba(255, 255, 255, 0.3),
+        inset 0 -2px 3px rgba(0, 0, 0, 0.9),
+        0 1px 2px rgba(255, 255, 255, 0.22);
+}
+
+.chassis-screw::before,
+.chassis-screw::after {
+    position: absolute;
+
+    content: "";
+
+    top: 50%;
+    left: 50%;
+
+    width: 7px;
+    height: 1px;
+
+    background: #11110f;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2);
+
+    transform: translate(-50%, -50%);
+}
+
+.chassis-screw::after {
+    transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.screw-top-left {
+    top: 10px;
+    left: 11px;
+}
+
+.screw-top-right {
+    top: 10px;
+    right: 11px;
+}
+
+.screw-bottom-left {
+    bottom: 10px;
+    left: 11px;
+}
+
+.screw-bottom-right {
+    right: 11px;
+    bottom: 10px;
+}
+
+/* ===================================================================
+   Header panel — 50px height
+   ================================================================ */
+
+.header-panel {
+    position: relative;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 42px !important;
+    flex-shrink: 0 !important;
+    padding: 0 10px;
+    border: 2px solid #080807;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #2f2f2c, #141412 60%, #0a0a09);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13), inset 0 -4px 9px rgba(0, 0, 0, 0.92);
+    gap: 8px;
+    overflow: hidden;
+}
+
+.ussr-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    flex: 0 0 74px !important;
+    height: 24px;
+
+    color: #f0c840;
+
+    border: 1px solid #b87d1f;
+    border-radius: 3px;
+
+    background:
+        linear-gradient(
+            180deg,
+            #b88822,
+            #7a4f00
+        );
+
+    font-family: var(--font-display);
+    font-size: 10px !important;
+    letter-spacing: 1px;
+    text-align: center;
+
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.48),
+        inset 0 -2px 3px rgba(0, 0, 0, 0.8);
+}
+
+.header-brand {
+    flex: 1 1 auto !important;
+    min-width: 0 !important; /* ВАЖНО: позволяет сжиматься, не выталкивая правый край */
+    overflow: hidden;
+    white-space: nowrap;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+}
+
+.header-title {
+    color: #f3efe4;
+
+    font-family: var(--font-display);
+    font-size: 13px !important;
+    letter-spacing: 1.5px !important;
+    line-height: 1.1;
+
+    text-shadow:
+        0 1px 2px #000,
+        0 0 5px rgba(255, 255, 255, 0.18);
+}
+
+.header-subtitle {
+    color: #aaa497;
+
+    font-size: 7px !important;
+    letter-spacing: 1px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.header-selects {
+    flex: 0 0 auto !important;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ===================================================================
+   Dropdowns (Red LED Matrix Style)
+   =================================================================== */
+
+.mechlab-select,
+.mechlab-link-button {
+    height: 24px;
+    padding: 0 20px 0 8px;
+    
+    color: #ff3b30;
+    background: #080101; 
+    border: 1px solid #2a0505;
+    border-radius: 3px;
+    outline: none;
+    
+    font-family: var(--font-technical);
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    
+    text-shadow: 0 0 5px #ff3b30, 0 0 10px #ff0000;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.95), 0 1px 0 rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    text-align: left;
+    text-overflow: ellipsis;
+    transition: all 0.15s ease;
+}
+
+/* 2. Сам селект: отключаем letter-spacing (лечит баг разрыва текста в Chromium) */
+.mechlab-select {
+    width: 100% !important;
+    height: 24px;
+    padding: 0 18px 0 7px !important;
+    
+    color: #ff3b30;
+    background: #080101;
+    border: 1px solid #2a0505;
+    border-radius: 3px;
+    outline: none;
+
+    font-family: var(--font-technical), "Courier New", monospace;
+    font-size: 10px !important;
+    font-weight: bold;
+    letter-spacing: normal !important;
+    
+    text-shadow: 0 0 4px #ff3b30;
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.95);
+    cursor: pointer;
+    text-align: left !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 3. Всплывающее меню опций (ставим стабильный системный шрифт для попапа) */
+.mechlab-select option {
+    font-family: Arial, sans-serif !important;
+    letter-spacing: normal !important;
+    font-size: 11px !important;
+    background: #0d0202 !important;
+    color: #ff3b30 !important;
+    padding: 4px 6px;
+}
+
+.mechlab-select:hover,
+.mechlab-select:focus {
+    border-color: #ff3b30;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.9), 0 0 8px rgba(255, 59, 48, 0.35);
+}
+
+.mechlab-link-button {
+    color: #f6e9d9;
+    text-shadow: none;
+    background: linear-gradient(180deg, #a52d24, #64130f);
+    border-color: #7c221b;
+    text-align: center;
+}
+
+.mechlab-link-button.is-active {
+    color: #fff8e9;
+
+    border-color: #f4d36e;
+
+    background:
+        linear-gradient(
+            180deg,
+            #d34a35,
+            #861b14
+        );
+
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.38),
+        0 0 9px rgba(231, 56, 42, 0.52);
+}
+
+/* ===================================================================
+   VU meter (Red LED Style)
+   =================================================================== */
+
+.vu-meter-placeholder {
+    position: relative;
+    z-index: 2;
+    height: 72px;
+    margin-top: 14px;
+    
+    background: #0a0101;
+    border: 2px solid #1c0303;
+    border-radius: 4px;
+    box-shadow: inset 0 4px 12px rgba(0, 0, 0, 0.95), 0 1px 2px rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+
+.vu-meter-placeholder::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 1px, transparent 2px);
+    pointer-events: none;
+    z-index: 5;
+}
+
+.vu-scale {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 12px 0;
+    
+    color: #ff3b30;
+    font-size: 8px;
+    font-weight: bold;
+    text-shadow: 0 0 5px #ff3b30, 0 0 10px #ff0000;
+    font-family: var(--font-technical);
+    
+    position: relative;
+    z-index: 3;
+}
+
+.vu-needle {
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    width: 3px;
+    height: 60px;
+    background: #ff453a;
+    border-radius: 3px;
+    
+    transform-origin: bottom center;
+    box-shadow: 0 0 8px #ff453a, 0 0 15px #ff0000;
+    z-index: 4;
+    transition: transform 0.08s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.vu-caption {
+    position: absolute;
+    bottom: 4px;
+    right: 12px;
+    left: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    
+    color: #ff3b30;
+    font-size: 8px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-shadow: 0 0 5px #ff3b30;
+    font-family: var(--font-technical);
+    z-index: 3;
+}
+
+.header-select-os { width: 96px !important; flex-shrink: 0; }
+.header-select-tmt { width: 110px !important; flex-shrink: 0; }
+
+/* ===================================================================
+   Main panels — 295px height, 3-column grid
+   =================================================================== */
+
+/* ===================================================================
+   Сетки
+   =================================================================== */
+
+.main-panels {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px !important;
+    height: 285px !important;
+    flex-shrink: 0 !important;
+    margin-top: 6px !important;
+}
+
+.control-panel {
+    position: relative;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    padding: 8px 10px 6px !important; /* БЫЛО 24px 14px 14px */
+    border: 2px solid #161614;
+    border-radius: 6px;
+    background: linear-gradient(145deg, #a7a398, #817e75 45%, #65635c 100%);
+    box-shadow: inset 0 2px 1px rgba(255, 255, 255, 0.4), inset 0 -7px 11px rgba(0, 0, 0, 0.34);
+    overflow: hidden;
+}
+
+.control-panel::before {
+    position: absolute;
+    inset: 0;
+
+    content: "";
+
+    opacity: 0.2;
+    pointer-events: none;
+
+    background:
+        repeating-linear-gradient(
+            90deg,
+            transparent 0,
+            transparent 2px,
+            rgba(0, 0, 0, 0.07) 3px
+        );
+}
+
+.control-panel h2 {
+    position: static !important;
+    margin: 0 0 2px 0 !important;
+    line-height: 1 !important;
+    z-index: 2;
+    color: #24231f;
+    font-family: var(--font-display);
+    font-size: 10px !important;
+    letter-spacing: 0.8px;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.control-panel h2 b {
+    color: #9d251d;
+}
+
+.panel-screw {
+    position: absolute;
+
+    z-index: 3;
+
+    width: 8px;
+    height: 8px;
+
+    border: 1px solid #1a1917;
+    border-radius: 50%;
+
+    background:
+        radial-gradient(
+            circle at 33% 28%,
+            #d0ccc0 0%,
+            #77756e 25%,
+            #242421 72%,
+            #080807 100%
+        );
+}
+
+.panel-screw::before,
+.panel-screw::after {
+    position: absolute;
+
+    content: "";
+
+    top: 50%;
+    left: 50%;
+
+    width: 4px;
+    height: 1px;
+
+    background: #11110f;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2);
+
+    transform: translate(-50%, -50%);
+}
+
+.panel-screw::after {
+    transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.panel-screw-tl { top: 8px; left: 7px; }
+.panel-screw-tr { top: 8px; right: 7px; }
+.panel-screw-bl { bottom: 8px; left: 7px; }
+.panel-screw-br { bottom: 8px; right: 7px; }
+
+/* ===================================================================
+   Layout helpers
+   =================================================================== */
+
+/* 2. Верхняя половина панели (Большая ручка + Селекты) */
+.input-main-layout,
+.tape-main-layout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 130px !important; /* БЫЛО 115px */
+    margin: 0 0 4px 0 !important;
+}
+
+.output-middle-row {
+    display: flex;
+    align-items: flex-end; /* Опускаем к низу, чтобы выровнять с IRON */
+    justify-content: space-around;
+    margin-top: 14px;
+}
+
+/* ФИКС РАЗРЫВА БУКВ: единый блок поля с подписью */
+.mechlab-field {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    width: 100% !important;
+    margin: 0 !important;
+    gap: 2px !important;
+}
+
+.field-label,
+.control-label {
+    display: block !important;
+    width: 100% !important;
+    font-family: var(--font-technical), sans-serif !important;
+    font-size: 8px !important;
+    font-weight: 700 !important;
+    color: #26251f !important;
+    letter-spacing: 0.5px !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+    position: static !important;
+    margin: 0 0 2px 0 !important;
+}
+
+/* 1. Расширяем боковые блоки с 120px до 145px, чтобы названия влезали целиком */
+.input-side-controls,
+.tape-side-controls,
+.output-side-controls {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px;
+    width: 135px !important;
+    flex: 0 0 135px !important;
+    margin: 0 !important;
+}
+
+/* 4. Отделяем Dymo-наклейки от ручек */
+.knob-control {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px !important; /* БЫЛО 12px */
+}
+
+.knob-control.knob-large {
+    width: 85px !important;
+    flex: 0 0 85px !important;
+    height: 125px !important;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0 !important;
+}
+
+.knob-label {
+    color: #2a2923;
+
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-align: center;
+
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.knob-value {
+    min-height: 11px;
+
+    color: #7f1d18;
+
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+/* ===================================================================
+   Three-knob rows
+   =================================================================== */
+
+/* 2. Нижняя половина панели: 3 ручки в ряд */
+.three-knob-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 72px !important;
+    margin: 0 !important;
+}
+
+.four-knob-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr)); /* ФИКС: minmax */
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.four-knob-row .knob-control {
+    align-items: center;
+}
+
+.iron-control {
+    margin-right: -5px;
+}
+
+/* ===================================================================
+   Mechlab knobs — static placeholders for Stage 2
+   Will be replaced by real web rotary components in Stage 3.
+   =================================================================== */
+
+.mechlab-knob {
+    position: relative;
+
+    border: 2px solid #2a2926;
+    border-radius: 50%;
+
+    background:
+        radial-gradient(
+            circle,
+            var(--knob-metal-top) 0%,
+            var(--knob-metal-mid) 28%,
+            var(--knob-metal-dark) 52%,
+            #20201e 100%
+        );
+
+    box-shadow:
+        inset 0 2px 4px rgba(255, 255, 255, 0.62),
+        inset 0 -5px 8px rgba(0, 0, 0, 0.75),
+        0 3px 5px rgba(0, 0, 0, 0.58);
+}
+
+/*
+    Side cutouts: left-right groove
+*/
+.mechlab-knob::before {
+    position: absolute;
+
+    content: "";
+
+    top: 10%;
+    left: 3px;
+    right: 3px;
+
+    height: 12%;
+
+    border: 1px solid rgba(42, 41, 38, 0.55);
+    border-radius: 3px;
+
+    background: rgba(0, 0, 0, 0.35);
+}
+
+/*
+    Detented top surface
+*/
+.mechlab-knob::after {
+    position: absolute;
+
+    content: "";
+
+    top: 14%;
+    left: 50%;
+
+    width: 52%;
+    height: 68%;
+
+    border: 1px solid #22211e;
+    border-radius: 5px;
+
+    background:
+        repeating-linear-gradient(
+            90deg,
+            #353430 0px,
+            #353430 3px,
+            #2a2926 4px,
+            #2a2926 7px
+        );
+
+    transform: translate(-50%, 0);
+
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.7);
+}
+
+/*
+    Shaft center
+*/
+.mechlab-knob .knob-shaft {
+    position: absolute;
+    inset: 0;
+
+    margin: auto;
+
+    width: 12%;
+    height: 12%;
+
+    border: 1px solid #1a1917;
+    border-radius: 50%;
+
+    background:
+        radial-gradient(
+            circle,
+            #e3dfd5 0%,
+            #918e86 70%,
+            #262521
+        );
+
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+/*
+    Indicator tick marks around perimeter
+*/
+.mechlab-knob .knob-ticks {
+    position: absolute;
+    inset: 0;
+
+    margin: auto;
+
+    width: 90%;
+    height: 90%;
+
+    border-radius: 50%;
+
+    transform: rotate(-135deg);
+    transform-origin: center;
+
+    box-shadow:
+        0 0 0 1px transparent;
+
+    background:
+        conic-gradient(
+            from 0deg at center,
+            rgba(241, 238, 228, 0.35) 0deg 3deg,
+            transparent 4deg
+        ),
+        conic-gradient(
+            from 15deg at center,
+            rgba(241, 238, 228, 0.35) 15deg 18deg,
+            transparent 19deg
+        ),
+        conic-gradient(
+            from 30deg at center,
+            rgba(241, 238, 228, 0.35) 30deg 33deg,
+            transparent 34deg
+        ),
+        conic-gradient(
+            from 45deg at center,
+            rgba(241, 238, 228, 0.35) 45deg 48deg,
+            transparent 49deg
+        ),
+        conic-gradient(
+            from 60deg at center,
+            rgba(241, 238, 228, 0.35) 60deg 63deg,
+            transparent 64deg
+        ),
+        conic-gradient(
+            from 75deg at center,
+            rgba(241, 238, 228, 0.35) 75deg 78deg,
+            transparent 79deg
+        ),
+        conic-gradient(
+            from 90deg at center,
+            rgba(241, 238, 228, 0.35) 90deg 93deg,
+            transparent 94deg
+        ),
+        conic-gradient(
+            from 105deg at center,
+            rgba(241, 238, 228, 0.35) 105deg 108deg,
+            transparent 109deg
+        ),
+        conic-gradient(
+            from 120deg at center,
+            rgba(241, 238, 228, 0.35) 120deg 123deg,
+            transparent 124deg
+        ),
+        conic-gradient(
+            from 135deg at center,
+            rgba(241, 238, 228, 0.35) 135deg 138deg,
+            transparent 139deg
+        ),
+        conic-gradient(
+            from 150deg at center,
+            rgba(241, 238, 228, 0.35) 150deg 153deg,
+            transparent 154deg
+        ),
+        conic-gradient(
+            from 165deg at center,
+            rgba(241, 238, 228, 0.35) 165deg 168deg,
+            transparent 169deg
+        ),
+        conic-gradient(
+            from 180deg at center,
+            rgba(241, 238, 228, 0.35) 180deg 183deg,
+            transparent 184deg
+        ),
+        conic-gradient(
+            from 195deg at center,
+            rgba(241, 238, 228, 0.35) 195deg 198deg,
+            transparent 199deg
+        ),
+        conic-gradient(
+            from 210deg at center,
+            rgba(241, 238, 228, 0.35) 210deg 213deg,
+            transparent 214deg
+        ),
+        conic-gradient(
+            from 225deg at center,
+            rgba(241, 238, 228, 0.35) 225deg 228deg,
+            transparent 229deg
+        ),
+        conic-gradient(
+            from 240deg at center,
+            rgba(241, 238, 228, 0.35) 240deg 243deg,
+            transparent 244deg
+        ),
+        conic-gradient(
+            from 255deg at center,
+            rgba(241, 238, 228, 0.35) 255deg 258deg,
+            transparent 259deg
+        ),
+        conic-gradient(
+            from 270deg at center,
+            rgba(241, 238, 228, 0.35) 270deg 273deg,
+            transparent 274deg
+        ),
+        conic-gradient(
+            from 285deg at center,
+            rgba(241, 238, 228, 0.35) 285deg 288deg,
+            transparent 289deg
+        ),
+        conic-gradient(
+            from 300deg at center,
+            rgba(241, 238, 228, 0.35) 300deg 303deg,
+            transparent 304deg
+        ),
+        conic-gradient(
+            from 315deg at center,
+            rgba(241, 238, 228, 0.35) 315deg 318deg,
+            transparent 319deg
+        ),
+        conic-gradient(
+            from 330deg at center,
+            rgba(241, 238, 228, 0.35) 330deg 333deg,
+            transparent 334deg
+        ),
+        transparent 0deg;
+        background-origin: content-box;
+}
+
+/*
+    Red indicator on top of knob
+*/
+.mechlab-knob .knob-indicator {
+    position: absolute;
+
+    top: -8%;
+    left: 50%;
+
+    width: 4px;
+    height: 12%;
+
+    border-radius: 2px;
+
+    background: linear-gradient(
+        180deg,
+        #ff4d40,
+        #c01c10
+    );
+
+    transform: translateX(-50%);
+
+    box-shadow:
+        0 0 4px rgba(229, 65, 52, 0.7),
+        0 0 7px rgba(229, 65, 52, 0.4);
+}
+
+.mechlab-knob-default {
+    width: 52px;
+    height: 52px;
+}
+
+.mechlab-knob-sm {
+    width: 52px;
+    height: 52px;
+}
+
+.mechlab-knob-md {
+    width: 52px;
+    height: 52px;
+}
+
+.mechlab-knob-xs {
+    width: 42px;
+    height: 42px;
+}
+
+.mechlab-knob-xl {
+    width: 78px;
+    height: 78px;
+}
+
+/* ===================================================================
+   LED BAR COMPONENTS (Saturation & VU Meter)
+   =================================================================== */
+
+/* Базовый контейнер LED панели */
+.led-bar-container {
+    position: relative;
+    flex: 1;
+    height: 12px;
+    background: #060606;
+    border: 1px solid #1a1a18;
+    border-radius: 2px;
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.95), 0 1px 0 rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+
+/* Слой-маска, создающая "дырки" (чёрные перегородки) между диодами */
+.led-track {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, #0f220f 0%, #1c220a 50%, #22150a 75%, #220a0a 100%);
+    -webkit-mask-image: repeating-linear-gradient(90deg, #000 0px, #000 3px, transparent 3px, transparent 4px);
+    mask-image: repeating-linear-gradient(90deg, #000 0px, #000 3px, transparent 3px, transparent 4px);
+}
+
+/* Слой заполнения - яркие горящие диоды */
+.led-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #2ecc71 0%, #7ecc31 40%, #f1c40f 65%, #e67e22 80%, #ff2a2a 100%);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.25);
+    transition: width 0.08s cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: width;
+}
+
+/* ===================================================================
+   Saturation LED layout
+   =================================================================== */
+
+.sat-indicator-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 14px !important;
+    margin: 4px 14px 0 14px !important;
+    color: #7a3d2f;
+    font-size: 7.5px;
+}
+
+.sat-label {
+    width: 28px;
+    font-weight: bold;
+}
+
+.sat-label-right {
+    margin-left: auto;
+}
+
+/* ===================================================================
+   Calibration strip (static)
+   =================================================================== */
+
+.calibration-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 18px !important;
+    margin: 4px 12px 0 12px !important; /* Отступ 12px от винтов! */
+    padding: 0 8px;
+    font-size: 7.5px;
+    letter-spacing: 1px;
+
+    color: #dad2c1;
+
+    border: 1px solid #292824;
+    border-radius: 3px;
+
+    background:
+        linear-gradient(
+            180deg,
+            #262521,
+            #11110f
+        );
+
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85);
+}
+
+.calibration-marks {
+    display: flex;
+    gap: 6px;
+}
+
+.calibration-marks i {
+    display: block;
+
+    width: 2px;
+    height: 9px;
+
+    background: #c8c0ad;
+}
+
+.calibration-marks i:nth-child(3n) {
+    height: 14px;
+}
+
+/* ===================================================================
+   VU Meter LED layout
+   =================================================================== */
+
+.vu-meter-led {
+    position: relative;
+    z-index: 2;
+    height: 60px;
+    margin: 16px 10px 0 10px !important;
+    background: #0d0d0c;
+    border: 2px solid #1c1c1a;
+    border-radius: 4px;
+    box-shadow: inset 0 4px 12px rgba(0, 0, 0, 0.95), 0 1px 2px rgba(255, 255, 255, 0.1);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+}
+
+.vu-caption {
+    position: static;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #8f8177;
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.vu-caption strong {
+    color: #d43a2f;
+    font-size: 9px;
+}
+
+.vu-scale-led {
+    display: flex;
+    flex: 1;
+    justify-content: space-between;
+    padding: 0 12px;
+    color: #8f8177;
+    font-family: var(--font-technical);
+    font-size: 8px;
+    font-weight: bold;
+}
+
+/* VU Метр толще, чем полоски сатурации */
+.vu-led-bar {
+    height: 16px;
+}
+
+.vu-led-bar .led-track {
+    -webkit-mask-image: repeating-linear-gradient(90deg, #000 0px, #000 5px, transparent 5px, transparent 7px);
+    mask-image: repeating-linear-gradient(90deg, #000 0px, #000 5px, transparent 5px, transparent 7px);
+}
+
+/* ===================================================================
+   Expander button row — 24px
+   =================================================================== */
+
+.expander-button-row {
+    display: grid !important;
+    grid-template-columns: 180px 1fr 180px !important;
+    align-items: center !important;
+    gap: 10px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    margin-top: 8px !important;
+    margin-bottom: 4px !important;
+}
+
+.expander-button {
+    width: 100%;
+    height: 24px !important;
+    font-size: 9.5px !important;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    color: #e6decc;
+    border: 1px solid #252421;
+    border-radius: 3px;
+    background: linear-gradient(180deg, #393833, #191917);
+    cursor: pointer;
+}
+
+.expander-button:hover,
+.expander-button.is-open {
+    border-color: #c7a64f;
+    color: #f0c840;
+}
+
+.serial-plate {
+    justify-self: center;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 20px;
+    padding: 2px 8px;
+
+    color: #3d3b36;
+
+    border: 1px solid rgba(50, 49, 45, 0.6);
+    border-radius: 2px;
+
+    background:
+        linear-gradient(
+            180deg,
+            #bdb8ab,
+            #7f7b72
+        );
+
+    font-size: 7.5px !important;
+    letter-spacing: 1px;
+
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        inset 0 -2px 3px rgba(0, 0, 0, 0.28);
+}
+
+.serial-plate strong {
+    font-size: 9px;
+}
+
+/* ===================================================================
+   Expanders — normal document flow, not absolute
+   =================================================================== */
+
+/* 3. Фикс Шторок (Drawers) - убираем прыгающие отступы */
+.expander-panel {
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin-top: 0;
+    border-width: 0;
+    border: 0 solid #151513;
+    border-radius: 5px;
+    background: linear-gradient(145deg, #8b887f, #5b5953);
+    transform: translateY(-5px);
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.expander-panel.is-open {
+    max-height: 500px; /* БЫЛО 400. Увеличили, чтобы ARCHIVE влезал полностью */
+    opacity: 1;
+    padding-top: 14px;
+    padding-bottom: 14px;
+    margin-top: 12px;
+    border-width: 2px;
+    transform: translateY(0);
+}
+
+.eq-expander {
+    margin-top: 12px;
+
+    display: block !important; /* Убираем конфликты с flex-align */
+
+    padding: 14px;
+}
+
+.archive-expander {
+    margin-top: 12px;
+
+    flex-direction: column;
+    align-items: center;
+
+    padding: 14px;
+}
+
+.expander-panel .control-label {
+    margin-bottom: 2px;
+}
+
+/* EQ controls */
+/* 2x2 Grid + Canvas layout */
+.eq-drawer-layout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 24px;
+}
+
+/* Левый блок: сетка 2x2 для маленьких ручек */
+.eq-knobs-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 20px;
+    flex: 0 0 auto;
+}
+
+.eq-knobs-grid .knob-control {
+    gap: 2px !important;
+}
+
+.eq-knobs-grid .knob-label {
+    white-space: nowrap;
+}
+
+/* Правый блок: Экран эквалайзера */
+.eq-monitor-graph {
+    position: relative;
+    flex: 1;
+    height: 108px;
+    margin-top: 0;
+    overflow: hidden;
+    border: 2px solid #24231f;
+    border-radius: 3px;
+    background: #10100f;
+    box-shadow: inset 0 2px 6px #000;
+}
+
+.eq-grid {
+    position: absolute;
+    inset: 0;
+
+    opacity: 0.45;
+
+    background:
+        repeating-linear-gradient(
+            0deg,
+            transparent 0,
+            transparent 20px,
+            rgba(208, 181, 103, 0.19) 21px
+        ),
+        repeating-linear-gradient(
+            90deg,
+            transparent 0,
+            transparent 69px,
+            rgba(208, 181, 103, 0.18) 70px
+        );
+}
+
+.eq-static-curve {
+    position: absolute;
+    top: 26px;
+    right: 4%;
+    left: 4%;
+
+    height: 28px;
+
+    border-top: 2px solid #d6b55d;
+
+    filter: blur(2px);
+
+    transform: skewY(-3deg);
+
+    box-shadow: 0 0 5px rgba(214, 181, 81, 0.55);
+}
+
+/* Archive controls */
+/* 4. Фикс наложения крутилок в Archive блоке */
+.archive-knob-row {
+    display: grid;
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    margin-bottom: 24px;
+}
+
+.archive-knob-row .knob-control {
+    align-items: center;
+}
+
+.archive-bottom-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0 12px;
+    gap: 30px;
+}
+
+.noise-mode-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.noise-mode-control .control-label { margin-bottom: 0; }
+
+.mechlab-select-small {
+    width: 102px;
+}
+
+.temperature-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+}
+
+.temperature-row input[type="range"] {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #185a9d 0%, #43e97b 30%, #f4d03f 60%, #ff512f 100%);
+    appearance: none;
+    outline: none;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.8);
+}
+
+.temperature-row input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 20px;
+    background: #111;
+    border: 2px solid #444;
+    border-radius: 3px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.9);
+    cursor: pointer;
+}
+
+/* ===================================================================
+   Bottom service / ventilation panel
+   =================================================================== */
+
+/* 5. Нижняя вентиляционная панель */
+.bottom-service-panel {
+    position: relative;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 22px !important;
+    min-height: 22px !important;
+    flex-shrink: 0 !important;
+    margin-top: 4px !important;
+    font-size: 6.5px !important;
+}
+
+.vent-grille {
+    display: flex;
+    gap: 3px;
+}
+
+.vent-grille span {
+    width: 16px;
+    height: 5px;
+
+    border-radius: 2px;
+
+    background:
+        linear-gradient(
+            180deg,
+            #050505,
+            #34332f 42%,
+            #060605
+        );
+
+    box-shadow:
+        inset 0 1px 1px rgba(0, 0, 0, 0.95),
+        0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.bottom-service-panel span {
+    flex: 1;
+
+    color: #989185;
+
+    font-size: 7px;
+    letter-spacing: 1px;
+    text-align: center;
+}

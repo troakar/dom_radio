@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>Dom Radio Mechlabor 610 — Mechlabor STM-610</title>
+
+    <link rel="stylesheet" href="css/fonts.css">
+    <link rel="stylesheet" href="css/variables.css">
+    <link rel="stylesheet" href="css/theme.css">
+    <link rel="stylesheet" href="css/base.css">
+
+    <!-- Компоненты -->
+    <link rel="stylesheet" href="css/components/chicken-knob.css">
+    <link rel="stylesheet" href="css/components/backlit-button.css">
+</head>
+
+<body>
+    <div class="device-artboard" id="device-artboard">
+
+        <!-- ============================================================
+             Mechlabor outer chassis
+             ============================================================ -->
+        <main class="mechlabor-device device-chassis" id="mechlabor-device">
+
+            <div class="metal-texture"></div>
+            <div class="chassis-glare"></div>
+
+            <!-- Corner screws -->
+            <span class="chassis-screw screw-top-left"></span>
+            <span class="chassis-screw screw-top-right"></span>
+            <span class="chassis-screw screw-bottom-left"></span>
+            <span class="chassis-screw screw-bottom-right"></span>
+
+            <!-- ========================================================
+                 1. HEADER
+                 ======================================================== -->
+            <header class="header-panel">
+
+                <div class="ussr-badge">
+                    <span>&#9733; СССР</span>
+                </div>
+
+                <div class="header-brand">
+                    <div class="header-title">
+                        D O M&nbsp;&nbsp;R A D I O&nbsp;&nbsp;M E C H L A B O R&nbsp;&nbsp;6 1 0
+                    </div>
+
+                    <div class="header-subtitle">
+                        МАЭСТРО-МАГНИТОФОН · МАХАЧКАЛА 1978 · ГОСТ 12107-74
+                    </div>
+                </div>
+
+                <div class="header-selects">
+                    <select
+                        id="oversampling-combo"
+                        class="mechlab-select header-select header-select-os"
+                        aria-label="Oversampling"
+                    >
+                        <option>1x (Off)</option>
+                        <option>2x</option>
+                        <option>4x</option>
+                        <option>8x</option>
+                    </select>
+
+                    <select
+                        id="tmt-mode-combo"
+                        class="mechlab-select header-select header-select-tmt"
+                        aria-label="TMT mode"
+                    >
+                        <option>Calibrated</option>
+                        <option>Typical</option>
+                        <option>Loose</option>
+                        <option>Vintage</option>
+                    </select>
+                </div>
+            </header>
+
+            <!-- ========================================================
+                 2. Main three panels
+                 ======================================================== -->
+            <section class="main-panels">
+
+                <!-- 1. INPUT & DRIVE -->
+                <section class="control-panel input-panel">
+                    <span class="panel-screw panel-screw-tl"></span>
+                    <span class="panel-screw panel-screw-tr"></span>
+                    <span class="panel-screw panel-screw-bl"></span>
+                    <span class="panel-screw panel-screw-br"></span>
+
+                    <h2><b>1.</b> INPUT &amp; DRIVE</h2>
+
+                    <div class="input-main-layout">
+                        <div class="knob-control knob-large">
+                            <span class="knob-label">IN GAIN</span>
+                            <div id="knob-in-gain" class="chicken-knob-placeholder" data-param="IN_GAIN"></div>
+                            <span id="knob-in-gain-value" class="knob-value">0.0 dB</span>
+                        </div>
+
+                        <div class="input-side-controls">
+                            <div class="mechlab-field">
+                                <span class="field-label">DRIVE TYPE</span>
+                                <select id="drive-type-combo" class="mechlab-select" aria-label="Drive type">
+                                    <option>Silicon</option>
+                                    <option>Germanium</option>
+                                </select>
+                            </div>
+
+                            <button id="btn-in-link" class="mechlab-link-button" type="button">LINK</button>
+                        </div>
+                    </div>
+
+                    <div class="three-knob-row">
+                        <div class="knob-control">
+                            <span class="knob-label">PRE DRIVE</span>
+                            <div id="knob-pre-drive" class="chicken-knob-placeholder" data-param="DRIVE"></div>
+                        </div>
+                        <div class="knob-control">
+                            <span class="knob-label">TAPE DRIVE</span>
+                            <div id="knob-tape-drive" class="chicken-knob-placeholder" data-param="TAPE_DRIVE"></div>
+                        </div>
+                        <div class="knob-control">
+                            <span class="knob-label">SLEW</span>
+                            <div id="knob-slew" class="chicken-knob-placeholder" data-param="TRANSIENT"></div>
+                        </div>
+                    </div>
+
+                    <!-- LED панели сатурации -->
+                    <div class="sat-indicator-row">
+                        <span class="sat-label">SAT</span>
+                        <div class="led-bar-container"><div class="led-track"><div class="led-fill" id="sat-led-drive"></div></div></div>
+                        <span class="sat-label sat-label-right">TAPE</span>
+                        <div class="led-bar-container"><div class="led-track"><div class="led-fill" id="sat-led-tape"></div></div></div>
+                    </div>
+                </section>
+
+                <!-- 2. TAPE & CALIBRATION -->
+                <section class="control-panel tape-panel">
+                    <span class="panel-screw panel-screw-tl"></span>
+                    <span class="panel-screw panel-screw-tr"></span>
+                    <span class="panel-screw panel-screw-bl"></span>
+                    <span class="panel-screw panel-screw-br"></span>
+
+                    <h2><b>2.</b> TAPE &amp; CALIBRATION</h2>
+
+                    <div class="tape-main-layout">
+                        <div class="knob-control knob-large">
+                            <span class="knob-label">TAPE SPEED</span>
+                            <div id="knob-tape-speed" class="chicken-knob-placeholder" data-param="TAPE_SPEED"></div>
+                            <span id="knob-tape-speed-value" class="knob-value">15 ips</span>
+                        </div>
+
+                        <div class="tape-side-controls">
+                            <div class="mechlab-field">
+                                <span class="field-label">EQ STD</span>
+                                <select id="eq-std-combo" class="mechlab-select" aria-label="EQ standard">
+                                    <option>CCIR</option>
+                                    <option>NAB</option>
+                                </select>
+                            </div>
+
+                            <div class="mechlab-field">
+                                <span class="field-label">TAPE MODEL</span>
+                                <select id="tape-model-combo" class="mechlab-select" aria-label="Tape model">
+                                    <option>SVEMA A4409</option>
+                                    <option>ORWO TYP 106</option>
+                                    <option>SCOTCH 2500 HAEG</option>
+                                    <option>BASF SPR 50 LHL</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="three-knob-row">
+                        <div class="knob-control">
+                            <span class="knob-label">AIR</span>
+                            <div id="knob-air" class="chicken-knob-placeholder" data-param="AIR"></div>
+                        </div>
+                        <div class="knob-control">
+                            <span class="knob-label">BIAS</span>
+                            <div id="knob-bias" class="chicken-knob-placeholder" data-param="BIAS"></div>
+                        </div>
+                        <div class="knob-control">
+                            <span class="knob-label">DECAY</span>
+                            <div id="knob-decay" class="chicken-knob-placeholder" data-param="DECAY"></div>
+                        </div>
+                    </div>
+
+                    <div class="calibration-strip">
+                        <span>CALIBRATION</span>
+                        <div class="calibration-marks">
+                            <i></i><i></i><i></i><i></i><i></i>
+                            <i></i><i></i><i></i><i></i>
+                        </div>
+                        <span>IEC 94</span>
+                    </div>
+                </section>
+
+                <!-- 3. OUTPUT & METERING -->
+                <section class="control-panel output-panel">
+                    <span class="panel-screw panel-screw-tl"></span>
+                    <span class="panel-screw panel-screw-tr"></span>
+                    <span class="panel-screw panel-screw-bl"></span>
+                    <span class="panel-screw panel-screw-br"></span>
+
+                    <h2><b>3.</b> OUTPUT &amp; METERING</h2>
+
+                    <div class="four-knob-row">
+                        <div class="knob-control">
+                            <span class="knob-label">SMART MIX</span>
+                            <div id="knob-mix" class="chicken-knob-placeholder" data-param="MIX"></div>
+                            <span id="knob-mix-value" class="knob-value">100%</span>
+                        </div>
+
+                        <div class="knob-control">
+                            <span class="knob-label">OUTPUT</span>
+                            <div id="knob-out-lvl" class="chicken-knob-placeholder" data-param="OUT_LVL"></div>
+                            <span id="knob-out-lvl-value" class="knob-value">0.0 dB</span>
+                        </div>
+
+                        <div class="knob-control">
+                            <span class="knob-label">DETAILS</span>
+                            <div id="knob-detail-amount" class="chicken-knob-placeholder" data-param="DETAIL_AMOUNT"></div>
+                        </div>
+
+                        <div class="knob-control">
+                            <span class="knob-label">TILT</span>
+                            <div id="knob-detail-tilt" class="chicken-knob-placeholder" data-param="DETAIL_TILT"></div>
+                        </div>
+                    </div>
+
+                    <div class="output-middle-row">
+                        <!-- Группируем Список и Кнопку вместе, как в левой панели -->
+                        <div class="output-side-controls">
+                            <div class="mechlab-field">
+                                <span class="field-label">DETAIL ALGO</span>
+                                <select id="detail-algo-combo" class="mechlab-select" aria-label="Detail algorithm">
+                                    <option>Wideband Tilt</option>
+                                    <option>Multiband Spectral</option>
+                                </select>
+                            </div>
+                            <button id="btn-out-link" class="mechlab-link-button" type="button">LINK</button>
+                        </div>
+
+                        <!-- Одинокая ручка IRON справа -->
+                        <div class="knob-control iron-control">
+                            <span class="knob-label">IRON</span>
+                            <div id="knob-iron-core" class="chicken-knob-placeholder" data-param="IRON_CORE"></div>
+                        </div>
+                    </div>
+
+                    <!-- LED VU-метр -->
+                    <div class="vu-meter-led">
+                        <div class="vu-caption">
+                            <strong>VU</strong>
+                            <span class="vu-scale-led"><span>-20</span><span>-10</span><span>-5</span><span>0</span><span>+3</span></span>
+                            <em>dB</em>
+                        </div>
+                        <div class="led-bar-container vu-led-bar">
+                            <div class="led-track"><div class="led-fill" id="vu-led-main"></div></div>
+                        </div>
+                    </div>
+                </section>
+            </section>
+
+            <!-- ========================================================
+                 3. Expander buttons
+                 ======================================================== -->
+            <section class="expander-button-row">
+                <button
+                    id="btn-archive-toggle"
+                    class="expander-button"
+                    type="button"
+                    aria-expanded="false"
+                >
+                    ARCHIVE '84 UNIT
+                </button>
+
+                <div class="serial-plate">
+                    <span>DOM RADIO LABS</span>
+                    <strong>NO. 0610-1978</strong>
+                </div>
+
+                <button
+                    id="btn-eq-toggle"
+                    class="expander-button"
+                    type="button"
+                    aria-expanded="false"
+                >
+                    EQ MONITOR
+                </button>
+            </section>
+
+            <!-- ========================================================
+                 4. EQ expander — 2x2 Grid + Canvas
+                 ======================================================== -->
+            <section
+                id="eq-drawer"
+                class="expander-panel eq-expander"
+                aria-hidden="true"
+            >
+                <div class="eq-drawer-layout">
+                    <!-- Левый блок: сетка ручек 2x2 -->
+                    <div class="eq-knobs-grid">
+                        <div class="knob-control">
+                            <span class="knob-label">BASS GAIN</span>
+                            <div id="knob-bass" class="chicken-knob-placeholder" data-param="BASS"></div>
+                        </div>
+
+                        <div class="knob-control">
+                            <span class="knob-label">TREBLE GAIN</span>
+                            <div id="knob-treble" class="chicken-knob-placeholder" data-param="TREBLE"></div>
+                        </div>
+
+                        <div class="knob-control">
+                            <span class="knob-label">BASS FREQ</span>
+                            <div id="knob-bass-freq" class="chicken-knob-placeholder" data-param="BASS_FREQ"></div>
+                        </div>
+
+                        <div class="knob-control">
+                            <span class="knob-label">TREBLE FREQ</span>
+                            <div id="knob-treble-freq" class="chicken-knob-placeholder" data-param="TREBLE_FREQ"></div>
+                        </div>
+                    </div>
+
+                    <!-- Правый блок: Canvas дисплей -->
+                    <div id="eq-monitor-graph" class="eq-monitor-graph">
+                        <canvas id="eq-canvas" style="width: 100%; height: 100%; display: block; border-radius: 3px;"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========================================================
+                 5. Archive expander
+                 ======================================================== -->
+            <section
+                id="archive-drawer"
+                class="expander-panel archive-expander"
+                aria-hidden="true"
+            >
+                <!-- 10 ручек в один ряд -->
+                <div class="archive-knob-row">
+                    <div class="knob-control"><span class="knob-label">AGE</span><div id="knob-age" class="chicken-knob-placeholder" data-param="AGE"></div></div>
+                    <div class="knob-control"><span class="knob-label">OXIDE</span><div id="knob-oxide" class="chicken-knob-placeholder" data-param="OXIDE"></div></div>
+                    <div class="knob-control"><span class="knob-label">AZIMUTH</span><div id="knob-azimuth" class="chicken-knob-placeholder" data-param="AZIMUTH"></div></div>
+                    <div class="knob-control"><span class="knob-label">BIAS SAG</span><div id="knob-bias-sag" class="chicken-knob-placeholder" data-param="BIAS_SAG"></div></div>
+                    <div class="knob-control"><span class="knob-label">SCRAPE</span><div id="knob-scrape" class="chicken-knob-placeholder" data-param="SCRAPE_FLUTTER"></div></div>
+                    <div class="knob-control"><span class="knob-label">X-TALK</span><div id="knob-crosstalk" class="chicken-knob-placeholder" data-param="CROSSTALK"></div></div>
+                    <div class="knob-control"><span class="knob-label">WOW</span><div id="knob-wow" class="chicken-knob-placeholder" data-param="WOW_AMOUNT"></div></div>
+                    <div class="knob-control"><span class="knob-label">FLUTTER</span><div id="knob-flutter" class="chicken-knob-placeholder" data-param="FLUTTER_AMOUNT"></div></div>
+                    <div class="knob-control"><span class="knob-label">NOISE</span><div id="knob-tape-noise" class="chicken-knob-placeholder" data-param="TAPE_NOISE"></div></div>
+                    <div class="knob-control"><span class="knob-label">HUM</span><div id="knob-hum" class="chicken-knob-placeholder" data-param="HUM"></div></div>
+                </div>
+
+                <!-- Нижний ряд: Noise Mode + Градиентный слайдер температуры -->
+                <div class="archive-bottom-row">
+                    <div class="noise-mode-control">
+                        <span class="control-label">NOISE MODE</span>
+                        <select id="noise-mode-combo" class="mechlab-select mechlab-select-small" aria-label="Noise mode">
+                            <option>Off</option>
+                            <option>Static</option>
+                            <option>Dynamic</option>
+                        </select>
+                    </div>
+
+                    <div class="temperature-row">
+                        <span class="knob-label">HEAD TEMPERATURE</span>
+                        <input id="temperature-slider" type="range" min="0" max="100" value="50">
+                        <span id="temperature-value" class="knob-value">25 °C</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========================================================
+                 6. Bottom service / ventilation
+                 ======================================================== -->
+            <footer class="bottom-service-panel">
+                <div class="vent-grille">
+                    <span></span><span></span><span></span><span></span>
+                    <span></span><span></span><span></span><span></span>
+                </div>
+
+                <span>
+                    MAGNETIC RECORDING SYSTEM &#183; MAINTAIN CALIBRATION &#183; HIGH VOLTAGE INSIDE &#183; DOM RADIO LABS 1978
+                </span>
+            </footer>
+        </main>
+    </div>
+
+    <script src="js/config/DebugConsole.js"></script>
+    <script src="js/juce-bridge.js"></script>
+    <script src="js/components/ChickenKnob.js"></script>
+    
+    <!-- EQ Monitor: canvas-based EQ graph ported from EQGraphLED.cpp -->
+    <script src="js/components/EQMonitor.js"></script>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

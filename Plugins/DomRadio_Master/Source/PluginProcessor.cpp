@@ -1048,6 +1048,8 @@ void DomRadioMasterAudioProcessor::getStateInformation (juce::MemoryBlock& destD
     auto state = apvts.copyState();
     state.setProperty("eqMonitorExpanded", eqMonitorExpanded, nullptr);
     state.setProperty("archiveExpanded", archiveExpanded, nullptr);
+    state.setProperty("uiWidth", savedEditorWidth.load(std::memory_order_relaxed), nullptr);
+    state.setProperty("uiHeight", savedEditorHeight.load(std::memory_order_relaxed), nullptr);
     
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
@@ -1058,10 +1060,60 @@ void DomRadioMasterAudioProcessor::setStateInformation (const void* data, int si
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
     if (xmlState != nullptr && xmlState->hasTagName (apvts.state.getType()))
     {
-        apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
-        eqMonitorExpanded = apvts.state.getProperty("eqMonitorExpanded", false);
-        archiveExpanded = apvts.state.getProperty("archiveExpanded", false);
+        auto restoredState = juce::ValueTree::fromXml (*xmlState);
+
+        if (restoredState.isValid())
+        {
+            const auto width = juce::jlimit (
+                480, 1920,
+                static_cast<int> (restoredState.getProperty ("uiWidth", savedEditorWidth.load (std::memory_order_relaxed))));
+
+            const auto height = juce::jlimit (
+                230, 800,
+                static_cast<int> (restoredState.getProperty ("uiHeight", savedEditorHeight.load (std::memory_order_relaxed))));
+
+            savedEditorWidth.store (width, std::memory_order_relaxed);
+            savedEditorHeight.store (height, std::memory_order_relaxed);
+
+            apvts.replaceState (restoredState);
+            eqMonitorExpanded = apvts.state.getProperty("eqMonitorExpanded", false);
+            archiveExpanded = apvts.state.getProperty("archiveExpanded", false);
+        }
     }
+}
+
+void DomRadioMasterAudioProcessor::setEditorSize (int width, int height) noexcept
+{
+    /*
+        Height now varies based on open drawers.
+        Original 1300:780 aspect ratio removed.
+    */
+
+    width = juce::jlimit (
+        480,
+        1920,
+        width);
+
+    height = juce::jlimit (
+        230,
+        800,
+        height);
+
+    savedEditorWidth.store (
+        width,
+        std::memory_order_relaxed);
+
+    savedEditorHeight.store (
+        height,
+        std::memory_order_relaxed);
+}
+
+juce::Point<int> DomRadioMasterAudioProcessor::getEditorSize() const noexcept
+{
+    return {
+        savedEditorWidth.load (std::memory_order_relaxed),
+        savedEditorHeight.load (std::memory_order_relaxed)
+    };
 }
 
 juce::AudioProcessorEditor* DomRadioMasterAudioProcessor::createEditor()

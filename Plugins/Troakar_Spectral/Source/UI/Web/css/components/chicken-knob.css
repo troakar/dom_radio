@@ -146,3 +146,109 @@
         0 3px 6px var(--knob-shadow);
     z-index: 6;
 }
+
+/* ================================================================
+   Manual value editor — Ctrl + click on a chicken knob
+   ================================================================ */
+
+.knob-manual-editor {
+    position: fixed;
+    z-index: 2147483000;
+
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    min-width: 178px;
+    padding: 7px;
+
+    background:
+        linear-gradient(
+            180deg,
+            rgba(38, 33, 26, 0.98),
+            rgba(12, 10, 8, 0.99)
+        );
+
+    border: 1px solid var(--chassis-base, #d4a446);
+    border-radius: 6px;
+
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.10),
+        inset 0 -3px 8px rgba(0, 0, 0, 0.85),
+        0 8px 22px rgba(0, 0, 0, 0.85),
+        0 0 14px rgba(212, 164, 70, 0.24);
+
+    font-family: var(--font-technical, monospace);
+}
+
+.knob-manual-input {
+    width: 106px;
+    min-width: 0;
+
+    padding: 6px 7px;
+
+    color: var(--text-value, #f0c872);
+    background: #090806;
+
+    border: 1px solid var(--panel-divider, #3a3430);
+    border-radius: 3px;
+    outline: none;
+
+    font-family: inherit;
+    font-size: 12px;
+    text-align: center;
+
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.9);
+}
+
+.knob-manual-input:focus {
+    border-color: var(--chassis-accent, #f0c872);
+    box-shadow:
+        inset 0 2px 5px rgba(0, 0, 0, 0.9),
+        0 0 8px rgba(212, 164, 70, 0.38);
+}
+
+.knob-manual-apply,
+.knob-manual-cancel {
+    appearance: none;
+
+    width: 27px;
+    height: 27px;
+
+    padding: 0;
+
+    border-radius: 4px;
+    cursor: pointer;
+
+    font-family: var(--font-technical, monospace);
+    font-size: 17px;
+    font-weight: 900;
+    line-height: 25px;
+    text-align: center;
+}
+
+.knob-manual-apply {
+    color: #fff7dd;
+    background: linear-gradient(180deg, #977126, #5b4114);
+    border: 1px solid var(--chassis-accent, #f0c872);
+
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.28),
+        0 0 8px rgba(212, 164, 70, 0.25);
+}
+
+.knob-manual-apply:hover {
+    background: linear-gradient(180deg, #c09130, #765516);
+}
+
+.knob-manual-cancel {
+    color: var(--text-secondary, #b8a88c);
+    background: #1a1713;
+    border: 1px solid var(--panel-divider, #3a3430);
+}
+
+.knob-manual-cancel:hover {
+    color: #ffffff;
+    border-color: #9a584d;
+    background: #3a1b18;
+}

@@ -102,7 +102,7 @@
         }
 
         buildDOM() {
-            var radius = this.type === 'big' ? 44 : (this.type === 'medium' ? 32 : 24);
+            var radius = this.type === 'big' ? 36 : (this.type === 'medium' ? 26 : 18);
 
             var ticksHTML = '<div class="knob-ticks">';
             for (var i = -135; i <= 135; i += 9) {
@@ -118,40 +118,24 @@
 
             var innerHTML = '';
 
-            if (this.type === 'medium') {
+            // ФИКС СВЕТА: .knob-static-shadow и .knob-bar-base стоят снаружи .knob-rotator!
+            // Их освещение зафиксировано сверху вниз и НЕ крутится!
+            if (this.type === 'big' || this.type === 'medium') {
                 innerHTML =
-                    '<div class="knob-shadow"></div>' +
+                    '<div class="knob-static-shadow"></div>' +
+                    '<div class="knob-bar-base"></div>' + 
                     '<div class="knob-rotator">' +
-                        '<div class="knob-texture ribbed"></div>' +
-                        '<div class="knob-pointer white-line"></div>' +
-                    '</div>';
-            } else if (this.type === 'big') {
-                var pathD = '';
-                for (var j = 0; j <= 360; j += 2) {
-                    var a  = j * Math.PI / 180;
-                    var r  = 44 + Math.sin(a * 8) * 2.5;
-                    var px = 50 + r * Math.cos(a);
-                    var py = 50 + r * Math.sin(a);
-                    pathD += (j === 0 ? 'M ' + px.toFixed(2) + ' ' + py.toFixed(2)
-                                      : ' L ' + px.toFixed(2) + ' ' + py.toFixed(2));
-                }
-                pathD += ' Z';
-
-                innerHTML =
-                    '<div class="knob-shadow big-shadow"></div>' +
-                    '<div class="knob-rotator">' +
-                        '<svg viewBox="0 0 100 100" class="scalloped-bg">' +
-                            '<path d="' + pathD + '" fill="var(--knob-base)" stroke="var(--panel-border)" stroke-width="1.5"/>' +
-                        '</svg>' +
-                        '<div class="knob-center-dome"></div>' +
-                        '<div class="knob-pointer white-line big-line"></div>' +
+                        '<div class="knob-bar-protrusion"></div>' +
+                        '<div class="knob-pointer-line"></div>' +
                     '</div>';
             } else {
                 innerHTML =
-                    '<div class="knob-shadow"></div>' +
-                    '<div class="knob-base metal-cone"></div>' +
+                    '<div class="knob-static-shadow"></div>' +
+                    '<div class="knob-knurled-edge"></div>' +
                     '<div class="knob-rotator">' +
-                        '<div class="knob-pointer black-line"></div>' +
+                        '<div class="knob-black-inset"></div>' +
+                        '<div class="knob-metal-cap"></div>' +
+                        '<div class="knob-pointer-dot"></div>' +
                     '</div>';
             }
 

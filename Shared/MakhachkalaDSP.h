@@ -1026,52 +1026,85 @@ public:
         spec.numChannels = 1;
         scrapeFilter.prepare(spec);
         follower.prepare(sampleRate);
-        scrapeDelay.setMaximumDelayInSamples(juce::jmax(8, static_cast<int>(sampleRate * 0.001)));
-        scrapeDelay.prepare(spec);
-        scrapeFilter.coefficients = juce::dsp::IIR::Coefficients<double>::makeBandPass(sampleRate, 4000.0, 0.8);
+        
+        // Узкополосный фильтр для выделения частоты физической резонанса ленты
+        scrapeFilter.coefficients = juce::dsp::IIR::Coefficients<double>::makeBandPass(sampleRate, 3500.0, 1.2);
         reset();
     }
+    
     void reset()
     {
         scrapeFilter.reset();
-        scrapeDelay.reset();
         follower.reset();
+        prevInput = 0.0f;
     }
+    
     forcedinline float process(float input, float age, float amount)
     {
         const float ageNorm = juce::jlimit(0.0f, 1.0f, age / 50.0f);
         
-        const float effectAmount = juce::jlimit(0.0f, 1.0f, amount) * (0.2f + ageNorm * 0.8f);
+        // Чем старше лента, тем сильнее смазка превращается в клей
+        const float effectAmount = juce::jlimit(0.0f, 1.0f, amount) * (0.15f + ageNorm * 0.85f);
         
         if (effectAmount <= 0.0001f)
+        {
+            prevInput = input;
             return input;
+        }
             
+        // 1. Генерируем аудио-рейт шум трения (Stick-Slip Noise)
         const float white = rng.nextFloat() * 2.0f - 1.0f;
         const float bandNoise = static_cast<float>(scrapeFilter.processSample(static_cast<double>(white)));
+        
+        // Детектируем амплитуду сигнала (трение сильнее на громких участках)
         const float envelope = follower.processSample(std::abs(input));
         
-        const float modulationMs = bandNoise * envelope * effectAmount * 0.035f;
-        const float delayMs = juce::jlimit(0.001f, 0.25f, 0.02f + modulationMs);
-        const float delaySamples = delayMs * static_cast<float>(sr) / 1000.0f;
-        scrapeDelay.setDelay(delaySamples);
-        scrapeDelay.pushSample(0, input);
-        return scrapeDelay.popSample(0);
+        // 2. ВЫЧИСЛЯЕМ ПРОИЗВОДНУЮ (SLEW) - это наши высокие частоты и транзиенты
+        const float slew = input - prevInput;
+        
+        // 3. MAGNETIC DIFFUSION (Эффект Khs Phase Distortion)
+        // Модулируем скорость нарастания волны шумом трения. 
+        // Это физически "размазывает" (blur) ВЧ-спектр, генерируя интермодуляцию БЕЗ сдвига фазы.
+        const float blurMod = bandNoise * envelope * effectAmount;
+        
+        // Коэффициент 4.5f дает ту самую "шероховатость" и жир на ВЧ
+        const float diffusedSlew = slew * (1.0f + blurMod * 4.5f); 
+        
+        // Реконструируем сигнал с размазанными верхами
+        float diffusedSignal = prevInput + diffusedSlew;
+        
+        // 4. OXIDE FLATTENING (Уплощение волны канавками)
+        // Вдавленная в головку старая лента физически компрессирует пики.
+        // Мы используем модуль шума для микро-сплющивания амплитуды.
+        const float flatten = 1.0f - (std::abs(bandNoise) * effectAmount * (0.2f + ageNorm * 0.3f));
+        diffusedSignal *= flatten;
+        
+        // 5. Асимметричный "впечатанный" дисторшен (Grit)
+        // Имитация деформации ленты на экстремальных значениях Age
+        if (ageNorm > 0.5f) {
+            const float grit = diffusedSignal * blurMod * ageNorm * 0.5f;
+            diffusedSignal += (diffusedSignal > 0.0f ? grit : -grit * 0.5f);
+        }
+
+        prevInput = input;
+        return diffusedSignal;
     }
+    
     void setSeed(uint32_t seed) { rng.setSeed(seed); }
+    
 private:
     class EnvelopeFollower
     {
     public:
         void prepare(double sampleRate)
         {
-            attack = 1.0f - std::exp(-1.0f / (0.010f * static_cast<float>(sampleRate)));
-            release = 1.0f - std::exp(-1.0f / (0.080f * static_cast<float>(sampleRate)));
+            // Очень быстрая реакция, чтобы ловить каждый удар барабана
+            attack = 1.0f - std::exp(-1.0f / (0.002f * static_cast<float>(sampleRate)));
+            release = 1.0f - std::exp(-1.0f / (0.040f * static_cast<float>(sampleRate)));
             reset();
         }
-        void reset()
-        {
-            value = 0.0f;
-        }
+        void reset() { value = 0.0f; }
+        
         forcedinline float processSample(float input)
         {
             const float coeff = input > value ? attack : release;
@@ -1079,15 +1112,14 @@ private:
             return value;
         }
     private:
-        float value = 0.0f;
-        float attack = 0.0f;
-        float release = 0.0f;
+        float value = 0.0f, attack = 0.0f, release = 0.0f;
     };
+    
     double sr = 44100.0;
+    float prevInput = 0.0f; // Память для вычисления производной (0 сэмплов задержки!)
     FastRandom rng { 42 };
     EnvelopeFollower follower;
     juce::dsp::IIR::Filter<double> scrapeFilter;
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> scrapeDelay;
 };
 
 class StereoCrosstalk

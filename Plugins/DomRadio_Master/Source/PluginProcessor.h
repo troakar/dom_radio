@@ -61,7 +61,7 @@ public:
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
-    const juce::String getName() const override { return "DOM RADIO MASTER"; }
+    const juce::String getName() const override { return "DOM RADIO MECHLABOR 610"; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -74,6 +74,9 @@ public:
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
+
+    void setEditorSize (int width, int height) noexcept;
+    juce::Point<int> getEditorSize() const noexcept;
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -249,6 +252,9 @@ private:
 public:
     bool eqMonitorExpanded = false;
     bool archiveExpanded = false;
+
+    std::atomic<int> savedEditorWidth  { 960 };
+    std::atomic<int> savedEditorHeight { 455 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DomRadioMasterAudioProcessor)
 };

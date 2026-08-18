@@ -1,0 +1,35 @@
+:root {
+    /*
+       Mechlabor knob material palette
+       Used by chicken-knob.css component styles
+    */
+
+    --knob-body: #353431;
+    --knob-body-highlight: #484743;
+    --knob-skirt: #2a2926;
+    --knob-pointer: #e6523f;
+    --knob-pointer-glow: rgba(230, 82, 63, 0.8);
+    --knob-center: #20201e;
+    --knob-shadow: rgba(0, 0, 0, 0.9);
+    --knob-tick-major: #e5decb;
+    --knob-tick-minor: #4e4b44;
+
+    --chassis-base: #292925;
+    --chassis-accent: #b62920;
+    --chassis-dark: #11110f;
+    --panel-border-thick: #080807;
+    --panel-divider: #2a2927;
+    --panel-section-border: #9d251d;
+
+    --text-secondary: #aaa497;
+    --text-value: #e5decb;
+
+    --border-thin: 1px;
+    --border-medium: 2px;
+    --border-thick: 3px;
+    --border-extra-thick: 4px;
+
+    --knob-small: 50px;
+    --knob-medium: 62px;
+    --knob-big: 74px;
+}
