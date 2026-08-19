@@ -773,6 +773,10 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     if (buffer.getNumChannels() == 1) osWorkBuffer.copyFrom(1, 0, buffer.getReadPointer(0), numSamples);
     else osWorkBuffer.copyFrom(1, 0, buffer.getReadPointer(1), numSamples);
 
+    // --- ОБЪЯВЛЯЕМ ЗДЕСЬ (снаружи скобок оверсэмплинга) ---
+    float maxInAct = 0.0f;
+    float maxTpAct = 0.0f;
+
     {
         juce::dsp::AudioBlock<float> fullBlock (osWorkBuffer);
         auto block = fullBlock.getSubBlock (0, (size_t) numSamples);
@@ -887,10 +891,6 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
             return wet * finalPostGain;
         };
-
-        // 1. Собираем пиковую активность реальных искажений по блоку
-        float maxInAct = 0.0f;
-        float maxTpAct = 0.0f;
 
         for (int i = 0; i < osNumSamples; ++i)
         {
