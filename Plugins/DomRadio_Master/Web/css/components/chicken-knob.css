@@ -18,6 +18,7 @@
 .chicken-knob.small  { width: var(--knob-small); height: var(--knob-small); }
 .chicken-knob.medium { width: var(--knob-medium); height: var(--knob-medium); }
 .chicken-knob.big    { width: var(--knob-big); height: var(--knob-big); }
+.chicken-knob.trim   { width: 32px; height: 32px; }
 
 .knob-ticks {
     position: absolute;
@@ -37,6 +38,7 @@
 .chicken-knob.small  .knob-body { width: 40px; height: 40px; }
 .chicken-knob.medium .knob-body { width: 56px; height: 56px; }
 .chicken-knob.big    .knob-body { width: 76px; height: 76px; }
+.chicken-knob.trim   .knob-body { width: 22px; height: 22px; }
 
 /* 1. СТАТИЧНАЯ ТЕНЬ: Всегда падает строго вниз, не крутится вместе с ручкой! */
 .knob-static-shadow {
@@ -170,3 +172,53 @@
 }
 
 .knob-manual-editor { display: none; }
+
+/* ===================================================================
+   TRIM POT (ПОДСТРОЕЧНЫЙ ВИНТ)
+   Металлический винт с шлицевой посадкой под плоскую отвёртку
+   =================================================================== */
+
+.chicken-knob.trim .knob-static-shadow {
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.75);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.85), 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+/* Металлическая посадочная шайба-углубление */
+.trim-collar {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #2a2926 0%, #151413 70%, #0d0c0c 100%);
+    border: 1px solid #11100f;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.9), 0 1px 1px rgba(255, 255, 255, 0.15);
+    z-index: 1;
+}
+
+/* Шляпка винта */
+.trim-screw-head {
+    position: absolute;
+    inset: 12%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #e2ded5 0%, #9e9a90 40%, #5c5a54 85%, #33322f 100%);
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 0.8),
+        inset 0 -1px 2px rgba(0, 0, 0, 0.7),
+        0 1px 3px rgba(0, 0, 0, 0.8);
+    border: 1px solid #3a3935;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+}
+
+/* Шлиц под плоскую отвёртку */
+.trim-screw-slot {
+    width: 72%;
+    height: 2.5px;
+    background: #141312;
+    border-radius: 1px;
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.4),
+        inset 0 1px 2px rgba(0, 0, 0, 0.95);
+}

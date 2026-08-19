@@ -37,6 +37,7 @@ juce_add_binary_data(DomRadioMasterBinaryData
     SOURCES
         ${CMAKE_SOURCE_DIR}/Shared/noises/noise_mid_velvet_and_soft.mp3
         ${CMAKE_SOURCE_DIR}/Shared/noises/noise_high_vinyl_like.mp3
+        ${CMAKE_SOURCE_DIR}/Shared/noises/noise_high_hiss.mp3
         ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/GOSTtypeB.ttf
         ${CMAKE_SOURCE_DIR}/Shared/UI_Assets/RussoOne-Regular.ttf
         ${WEB_ASSETS}

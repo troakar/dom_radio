@@ -41,7 +41,9 @@
         { id: 'knob-wow', param: 'WOW_AMOUNT', type: 'small', min: 0, max: 100, unit: '%', decimals: 0 },
         { id: 'knob-flutter', param: 'FLUTTER_AMOUNT', type: 'small', min: 0, max: 100, unit: '%', decimals: 0 },
         { id: 'knob-tape-noise', param: 'TAPE_NOISE', type: 'small', min: 0, max: 100, unit: '%', decimals: 0 },
-        { id: 'knob-hum', param: 'HUM', type: 'small', min: 0, max: 100, unit: '%', decimals: 0 }
+        { id: 'knob-hum', param: 'HUM', type: 'small', min: 0, max: 100, unit: '%', decimals: 0 },
+
+        { id: 'knob-noise-profile', param: 'NOISE_PROFILE', type: 'trim', min: 0, max: 100, unit: '%', decimals: 0, defaultValue: 0 }
     ];
 
     var COMBO_CONFIGS = [
@@ -400,27 +402,82 @@
     }
 
     function setupLinkButtons() {
-        [
-            'btn-in-link',
-            'btn-out-link'
-        ].forEach(
-            function (id) {
-                var button =
-                    document.getElementById(id);
+        var btnIn = document.getElementById('btn-in-link');
+        var btnOut = document.getElementById('btn-out-link');
+        var isLinked = false;
 
-                if (!button)
-                    return;
+        // Ищем инстансы наших ручек
+        var knobIn = knobs.find(k => k.paramId === 'IN_GAIN');
+        var knobOut = knobs.find(k => k.paramId === 'OUT_LVL');
 
-                button.addEventListener(
-                    'click',
-                    function () {
-                        button.classList.toggle(
-                            'is-active'
-                        );
-                    }
-                );
+        function updateLinkUI() {
+            if (btnIn) btnIn.classList.toggle('is-active', isLinked);
+            if (btnOut) btnOut.classList.toggle('is-active', isLinked);
+        }
+
+        // Если нажать на ЛЮБУЮ из кнопок, включается связь
+        function toggleLink(e) {
+            e.preventDefault();
+            isLinked = !isLinked;
+            updateLinkUI();
+        }
+
+        if (btnIn) btnIn.addEventListener('click', toggleLink);
+        if (btnOut) btnOut.addEventListener('click', toggleLink);
+
+        if (knobIn && knobOut) {
+            var isUpdating = false;
+            var lastIn = knobIn.value;
+            var lastOut = knobOut.value;
+
+            // Следим за изменениями от хоста (DAW)
+            if (JuceBridge) {
+                JuceBridge.onParamUpdate('IN_GAIN', val => { if (!isUpdating) lastIn = val; });
+                JuceBridge.onParamUpdate('OUT_LVL', val => { if (!isUpdating) lastOut = val; });
             }
-        );
+
+            // Перехватываем вращение ручки IN GAIN
+            var origInChange = knobIn.onValueChange;
+            knobIn.onValueChange = function(val) {
+                if (origInChange) origInChange(val);
+
+                var delta = val - lastIn; // На сколько повернули ручку
+                lastIn = val;
+
+                if (isLinked && !isUpdating) {
+                    isUpdating = true;
+                    // ИНВЕРСИЯ: отнимаем delta от ручки OUT_LVL
+                    var target = Math.max(0, Math.min(1, knobOut.value - delta));
+
+                    knobOut.setValue(target);
+                    lastOut = target;
+
+                    if (JuceBridge) JuceBridge.queueParameterChange('OUT_LVL', target);
+                    isUpdating = false;
+                }
+            };
+
+            // Перехватываем вращение ручки OUT LVL
+            var origOutChange = knobOut.onValueChange;
+            knobOut.onValueChange = function(val) {
+                if (origOutChange) origOutChange(val);
+
+                var delta = val - lastOut;
+                lastOut = val;
+
+                if (isLinked && !isUpdating) {
+                    isUpdating = true;
+                    // ИНВЕРСИЯ: отнимаем delta от ручки IN GAIN
+                    var target = Math.max(0, Math.min(1, knobIn.value - delta));
+
+                    knobIn.setValue(target);
+                    lastIn = target;
+
+                    if (JuceBridge) JuceBridge.queueParameterChange('IN_GAIN', target);
+                    isUpdating = false;
+                }
+            };
+        }
     }
 
     function startApp() {

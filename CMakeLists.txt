@@ -12,5 +12,4 @@ include_directories(Shared)
 
 add_subdirectory(Plugins/DomRadio_Master)
 add_subdirectory(Plugins/DomRadio_Drive)
-add_subdirectory(Plugins/DomRadio_Track)
 add_subdirectory(Plugins/Troakar_Spectral)

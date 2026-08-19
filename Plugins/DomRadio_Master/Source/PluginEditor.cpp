@@ -477,6 +477,17 @@ void DomRadioMasterAudioProcessorEditor::timerCallback()
         "satTape",
         audioProcessor.getTapeSaturationLevel());
 
+    // Спектр реального времени (48 полос)
+    float spectrumData[48] = { 0.0f };
+    audioProcessor.getSpectrumData (spectrumData, 48);
+
+    juce::Array<juce::var> spectrumArray;
+    spectrumArray.ensureStorageAllocated (48);
+    for (int i = 0; i < 48; ++i)
+        spectrumArray.add (spectrumData[i]);
+
+    telemetry->setProperty ("spectrum", spectrumArray);
+
     webView->emitEventIfBrowserIsVisible (
         "telemetry",
         juce::var (telemetry));

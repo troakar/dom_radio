@@ -444,8 +444,10 @@ public:
 
         if (profile.grainTextureNoise > 0.0001f && tapeLoad > 0.01f)
         {
-            const float noiseRaw = rng.nextFloat() * 2.0f - 1.0f;
-            output += output * noiseRaw * profile.grainTextureNoise * tapeLoad * 0.06f;
+            if ((noiseTick++ & 3) == 0) {
+                currentGrainNoise = rng.nextFloat() * 2.0f - 1.0f;
+            }
+            output += output * currentGrainNoise * profile.grainTextureNoise * tapeLoad * 0.06f;
         }
 
         return dynamicHighShelf.processSample(output);
@@ -509,6 +511,8 @@ private:
     float lastAppliedHighLossDb = -999.0f;
     float lastAppliedHighCutHz = -999.0f;
     int sampleCounter = 0;
+    int noiseTick = 0;
+    float currentGrainNoise = 0.0f;
     static constexpr float attackCoeff = 0.0025f;
     static constexpr float releaseCoeff = 0.00015f;
     juce::dsp::IIR::Filter<double> lowDetector;

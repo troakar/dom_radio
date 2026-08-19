@@ -52,7 +52,7 @@
                     </div>
 
                     <div class="header-subtitle">
-                        МАЭСТРО-МАГНИТОФОН · МАХАЧКАЛА 1978 · ГОСТ 12107-74
+                        МАЭСТРО-МАГНИТОФОН · 1978 · ГОСТ 12107-74
                     </div>
                 </div>
 
@@ -357,15 +357,23 @@
                     <div class="knob-control"><span class="knob-label">HUM</span><div id="knob-hum" class="chicken-knob-placeholder" data-param="HUM"></div></div>
                 </div>
 
-                <!-- Нижний ряд: Noise Mode + Градиентный слайдер температуры -->
+                <!-- Нижний ряд: Noise Mode + Подстроечный болт профиля + Градиентный слайдер температуры -->
                 <div class="archive-bottom-row">
-                    <div class="noise-mode-control">
-                        <span class="control-label">NOISE MODE</span>
-                        <select id="noise-mode-combo" class="mechlab-select mechlab-select-small" aria-label="Noise mode">
-                            <option>Off</option>
-                            <option>Static</option>
-                            <option>Dynamic</option>
-                        </select>
+                    <div class="noise-controls-group">
+                        <div class="noise-mode-control">
+                            <span class="control-label">NOISE MODE</span>
+                            <select id="noise-mode-combo" class="mechlab-select mechlab-select-small" aria-label="Noise mode">
+                                <option>Off</option>
+                                <option>Static</option>
+                                <option>Dynamic</option>
+                            </select>
+                        </div>
+
+                        <!-- Подстроечный винт (Studio Hiss <-> Newsreel) -->
+                        <div class="trim-pot-control" title="Noise Texture: 0% Studio Hiss | 100% Newsreel Grit">
+                            <span class="control-label">TEXTURE</span>
+                            <div id="knob-noise-profile" class="chicken-knob-placeholder" data-param="NOISE_PROFILE"></div>
+                        </div>
                     </div>
 
                     <div class="temperature-row">
@@ -393,6 +401,7 @@
     </div>
 
     <script src="js/config/DebugConsole.js"></script>
+    <script src="js/config/TapeProfiles.js"></script>
     <script src="js/juce-bridge.js"></script>
     <script src="js/components/ChickenKnob.js"></script>
     

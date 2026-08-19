@@ -102,17 +102,23 @@
         }
 
         buildDOM() {
-            var radius = this.type === 'big' ? 36 : (this.type === 'medium' ? 26 : 18);
+            var radius = this.type === 'big' ? 36 : (this.type === 'medium' ? 26 : (this.type === 'trim' ? 14 : 18));
 
             var ticksHTML = '<div class="knob-ticks">';
-            for (var i = -135; i <= 135; i += 9) {
-                var isMajor    = (i + 135) % 27 === 0;
-                var length     = isMajor ? 5 : 3;
-                var thickness  = isMajor ? 2 : 1.5;
-                var color      = isMajor ? 'var(--knob-tick-major)' : 'var(--knob-tick-minor)';
-                ticksHTML += '<div style="position:absolute; top:50%; left:50%; width:' + thickness
-                           + 'px; height:' + length + 'px; background:' + color
-                           + '; transform: translate(-50%, -50%) rotate(' + i + 'deg) translateY(-' + radius + 'px); border-radius:1px;"></div>';
+            if (this.type === 'trim') {
+                [-135, 0, 135].forEach(function(i) {
+                    ticksHTML += '<div style="position:absolute; top:50%; left:50%; width:1.5px; height:3px; background:var(--knob-tick-major); transform: translate(-50%, -50%) rotate(' + i + 'deg) translateY(-' + radius + 'px); border-radius:0.5px;"></div>';
+                });
+            } else {
+                for (var i = -135; i <= 135; i += 9) {
+                    var isMajor    = (i + 135) % 27 === 0;
+                    var length     = isMajor ? 5 : 3;
+                    var thickness  = isMajor ? 2 : 1.5;
+                    var color      = isMajor ? 'var(--knob-tick-major)' : 'var(--knob-tick-minor)';
+                    ticksHTML += '<div style="position:absolute; top:50%; left:50%; width:' + thickness
+                               + 'px; height:' + length + 'px; background:' + color
+                               + '; transform: translate(-50%, -50%) rotate(' + i + 'deg) translateY(-' + radius + 'px); border-radius:1px;"></div>';
+                }
             }
             ticksHTML += '</div>';
 
@@ -127,6 +133,15 @@
                     '<div class="knob-rotator">' +
                         '<div class="knob-bar-protrusion"></div>' +
                         '<div class="knob-pointer-line"></div>' +
+                    '</div>';
+            } else if (this.type === 'trim') {
+                innerHTML =
+                    '<div class="knob-static-shadow"></div>' +
+                    '<div class="trim-collar"></div>' +
+                    '<div class="knob-rotator">' +
+                        '<div class="trim-screw-head">' +
+                            '<div class="trim-screw-slot"></div>' +
+                        '</div>' +
                     '</div>';
             } else {
                 innerHTML =

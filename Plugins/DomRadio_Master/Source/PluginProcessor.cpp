@@ -44,6 +44,7 @@ DomRadioMasterAudioProcessor::DomRadioMasterAudioProcessor()
     mixParam = apvts.getRawParameterValue("MIX");
     ageParam = apvts.getRawParameterValue("AGE");
     noiseModeParam = apvts.getRawParameterValue("NOISE_MODE");
+    noiseProfileParam = apvts.getRawParameterValue("NOISE_PROFILE");
     humParam = apvts.getRawParameterValue("HUM");
     tapeNoiseParam = apvts.getRawParameterValue("TAPE_NOISE");
     oxideParam = apvts.getRawParameterValue("OXIDE");
@@ -251,6 +252,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout DomRadioMasterAudioProcessor
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         "NOISE_MODE", "Noise Mode", juce::StringArray { "Off", "Static", "Dynamic (Envelope)" }, 2));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "NOISE_PROFILE", "Noise Texture", juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f,
+        FloatAttr().withStringFromValueFunction(pctFormat).withValueFromStringFunction(pctParse)));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "HUM", "Mains Hum", juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f,
         FloatAttr().withStringFromValueFunction([](float value, int) {
             if (value < 0.01f) return juce::String("-INF dB");
@@ -333,6 +337,10 @@ void DomRadioMasterAudioProcessor::prepareToPlay (double sampleRate, int samples
     velvetGrainR.prepare(sampleRate, BinaryData::noise_mid_velvet_and_soft_mp3, BinaryData::noise_mid_velvet_and_soft_mp3Size);
     vinylGrainL.prepare(sampleRate, BinaryData::noise_high_vinyl_like_mp3, BinaryData::noise_high_vinyl_like_mp3Size);
     vinylGrainR.prepare(sampleRate, BinaryData::noise_high_vinyl_like_mp3, BinaryData::noise_high_vinyl_like_mp3Size);
+
+    hissGrainL.prepare(sampleRate, BinaryData::noise_high_hiss_mp3, BinaryData::noise_high_hiss_mp3Size);
+    hissGrainR.prepare(sampleRate, BinaryData::noise_high_hiss_mp3, BinaryData::noise_high_hiss_mp3Size);
+
     contactL.prepare(sampleRate); contactR.prepare(sampleRate);
     noiseDecayFilterL.prepare(sampleRate); noiseDecayFilterR.prepare(sampleRate);
 
@@ -370,6 +378,7 @@ void DomRadioMasterAudioProcessor::prepareToPlay (double sampleRate, int samples
     ageSmoothed.reset(sampleRate, 0.050);
     humSmoothed.reset(sampleRate, 0.050);
     tapeNoiseSmoothed.reset(sampleRate, 0.050);
+    noiseProfileSmoothed.reset(sampleRate, 0.050);
     oxideSmoothed.reset(sampleRate, 0.050);
     azimuthSmoothed.reset(sampleRate, 0.050);
     outputGainSmoothed.reset(sampleRate, 0.010);
@@ -400,6 +409,7 @@ void DomRadioMasterAudioProcessor::prepareToPlay (double sampleRate, int samples
     ageSmoothed.setCurrentAndTargetValue(ageParam ? ageParam->load() : 0.0f);
     humSmoothed.setCurrentAndTargetValue(humParam ? humParam->load() : 0.0f);
     tapeNoiseSmoothed.setCurrentAndTargetValue(tapeNoiseParam ? tapeNoiseParam->load() : 0.0f);
+    noiseProfileSmoothed.setCurrentAndTargetValue(noiseProfileParam ? noiseProfileParam->load() : 0.0f);
     oxideSmoothed.setCurrentAndTargetValue(oxideParam ? oxideParam->load() : 0.0f);
     azimuthSmoothed.setCurrentAndTargetValue(azimuthParam ? azimuthParam->load() : 0.0f);
     outputGainSmoothed.setCurrentAndTargetValue(outLvlParam ? juce::Decibels::decibelsToGain(outLvlParam->load()) : 1.0f);
@@ -490,7 +500,13 @@ void DomRadioMasterAudioProcessor::resetProcessingState()
     displayChannelDifference.store(0.0f); displayArchiveMotion.store(0.0f);
     displayEffectiveTapeActivity.store(0.0f); displayEffectivePreampActivity.store(0.0f);
     displayDetailActivity.store(0.0f);
-    
+
+    for (int i = 0; i < numSpectrumBins; ++i)
+        displaySpectrum[i].store (0.0f, std::memory_order_relaxed);
+    fftFifoIndex = 0;
+    std::fill (std::begin (fftFifo), std::end (fftFifo), 0.0f);
+    std::fill (std::begin (fftData), std::end (fftData), 0.0f);
+
     finalDcBlockL.reset(); finalDcBlockR.reset();
     noiseDecayFilterL.reset(); noiseDecayFilterR.reset();
     vuEnvL = 0.0f; vuEnvR = 0.0f;
@@ -603,6 +619,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     ageSmoothed.setTargetValue(ageParam->load());
     humSmoothed.setTargetValue(humParam->load());
     tapeNoiseSmoothed.setTargetValue(tapeNoiseParam->load());
+    noiseProfileSmoothed.setTargetValue(noiseProfileParam->load());
     oxideSmoothed.setTargetValue(oxideParam->load());
     azimuthSmoothed.setTargetValue(azimuthParam->load());
     outputGainSmoothed.setTargetValue(juce::Decibels::decibelsToGain(outLvlParam->load()));
@@ -620,6 +637,7 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     airSmoothed.skip(numSamples); decaySmoothed.skip(numSamples); bassSmoothed.skip(numSamples);
     trebleSmoothed.skip(numSamples); bassFrequencySmoothed.skip(numSamples); trebleFrequencySmoothed.skip(numSamples);
     ageSmoothed.skip(numSamples); humSmoothed.skip(numSamples); tapeNoiseSmoothed.skip(numSamples);
+    noiseProfileSmoothed.skip(numSamples);
     oxideSmoothed.skip(numSamples); azimuthSmoothed.skip(numSamples); wowAmountSmoothed.skip(numSamples);
     mixSmoothed.skip(numSamples); flutterAmountSmoothed.skip(numSamples);
     preBassSmoothed.skip(numSamples); preTrebleSmoothed.skip(numSamples);
@@ -870,6 +888,10 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
             return wet * finalPostGain;
         };
 
+        // 1. Собираем пиковую активность реальных искажений по блоку
+        float maxInAct = 0.0f;
+        float maxTpAct = 0.0f;
+
         for (int i = 0; i < osNumSamples; ++i)
         {
             float hfEnergyL = std::abs(osL[i] - (i > 0 ? osL[i-1] : 0.0f));
@@ -879,6 +901,9 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
             float hfEnergyR = std::abs(osR[i] - (i > 0 ? osR[i-1] : 0.0f));
             float actInR = 0.0f, actTpR = 0.0f;
             osR[i] = processWetChannel(osR[i], wetChainR, actInR, actTpR, hfEnergyR);
+
+            maxInAct = std::max(maxInAct, std::max(actInL, actInR));
+            maxTpAct = std::max(maxTpAct, std::max(actTpL, actTpR));
         }
 
         oversampler->processSamplesDown(block);
@@ -921,12 +946,12 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     {
         const float currentOutput = outputGainSmoothed.getNextValue();
         
-        const auto modulationL = wowGenL.generate(tapeSpeedNorm, effWow, effFlutter);
-        const auto modulationR = wowGenR.generate(tapeSpeedNorm, effWow, effFlutter);
+        // 1. Генерируем единую моно-модуляцию ленты для обоих каналов
+        const auto mod = wowGenL.generate(tapeSpeedNorm, effWow, effFlutter, effAzimuth, currentAgeForScrape, effMix);
 
         if (i == 0) {
-            displayWow.store(juce::jlimit(-1.0f, 1.0f, (modulationL.wow + modulationR.wow) * 0.5f), std::memory_order_relaxed);
-            displayFlutter.store(juce::jlimit(-1.0f, 1.0f, (modulationL.flutter + modulationR.flutter) * 0.5f), std::memory_order_relaxed);
+            displayWow.store(mod.displayWow, std::memory_order_relaxed);
+            displayFlutter.store(mod.displayFlutter, std::memory_order_relaxed);
         }
         
         const float humSample = humGen.process(effHum);
@@ -934,11 +959,12 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
         float blendedL = wetL[i];
         float blendedR = wetR != nullptr ? wetR[i] : 0.0f;
 
-        // ВАЖНО: TapeMechanics выполняется ВСЕГДА! 
-        // 25мс задержка должна присутствовать для PDC. Глубина LFO обнуляется за счет effMix внутри.
-        blendedL = mechL.process(blendedL, tapeSpeedNorm, effMix, effAzimuth, currentAgeForScrape, true, modulationL);
+        // 2. Пропускаем каналы через единый монолитный механизм:
+        // Левый канал: базовая модуляция
+        // Правый канал: базовая модуляция + микро-азимут (сдвиг фазы в микросекундах)
+        blendedL = mechL.process(blendedL, mod.commonDelaySec);
         if (wetR != nullptr)
-            blendedR = mechR.process(blendedR, tapeSpeedNorm, effMix, effAzimuth, currentAgeForScrape, false, modulationR);
+            blendedR = mechR.process(blendedR, mod.commonDelaySec + mod.azimuthDelaySec);
 
         crosstalk.process(blendedL, blendedR, effCrosstalk, currentAgeForScrape);
 
@@ -948,17 +974,32 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
         const auto modeEnum = (noiseMode == 0 ? TroakarDSP::NoiseMode::off : (noiseMode == 1 ? TroakarDSP::NoiseMode::staticNoise : TroakarDSP::NoiseMode::dynamicNoise));
 
+        // Получаем значение нашего болтика подстройки (0.0 = Hiss, 1.0 = Newsreel)
+        const float textureBlend = noiseProfileSmoothed.getNextValue();
+
+        // 1. Читаем "Грязный" слой кинохроники (зависит от AGE)
         float midGrainL  = velvetGrainL.process(blendedL, modeEnum, tapeSpeedNorm, ageNorm);
         float highGrainL = vinylGrainL.process(blendedL, modeEnum, tapeSpeedNorm, ageNorm);
-        float combinedGrainL = midGrainL * (1.0f - ageNorm * 0.2f) + highGrainL * (0.30f + ageNorm * 0.70f);
+        float newsreelNoiseL = midGrainL * (1.0f - ageNorm * 0.2f) + highGrainL * (0.30f + ageNorm * 0.70f);
 
-        float intermodDepthL = (0.08f + ageNorm * 0.20f) * (0.3f + effTapeNoise * 0.7f);
+        // 2. Читаем чистый студийный HISS (не зависит от AGE, поэтому передаем ageNorm = 0.0f)
+        float hissNoiseL = hissGrainL.process(blendedL, modeEnum, tapeSpeedNorm, 0.0f);
+
+        // 3. Кроссфейд между Hiss и Newsreel
+        float combinedGrainL = (hissNoiseL * (1.0f - textureBlend)) + (newsreelNoiseL * textureBlend);
+
+        // Интермодуляция шума и сигнала (только для грязного шума, hiss не должен сильно модулировать сигнал)
+        float intermodDepthL = (0.08f + ageNorm * 0.20f) * (0.3f + effTapeNoise * 0.7f) * textureBlend;
         float intermodL = 1.0f + combinedGrainL * intermodDepthL;
         blendedL *= intermodL;
 
+        // Финальная сборка шума: Hiss независим от Age, а Newsreel зависит
         float noiseCurve = effTapeNoise * (0.45f + 0.55f * effTapeNoise);
-        float additiveNoiseL = combinedGrainL * noiseCurve * (0.45f + ageNorm * 0.15f);
-        float contactNoiseL = contactL.process(blendedL, currentAgeForScrape, effHum, modeEnum) * effTapeNoise;
+        float ageNoiseScale = (1.0f - textureBlend) * 0.45f + textureBlend * (0.45f + ageNorm * 0.15f);
+        
+        float additiveNoiseL = combinedGrainL * noiseCurve * ageNoiseScale;
+        float contactNoiseL = contactL.process(blendedL, currentAgeForScrape, effHum, modeEnum) * effTapeNoise * textureBlend;
+        
         float rawNoiseSumL = (additiveNoiseL + humSample + contactNoiseL) * 0.6f;
         blendedL += noiseDecayFilterL.processSample(rawNoiseSumL);
 
@@ -966,14 +1007,20 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
         {
             float midGrainR  = velvetGrainR.process(blendedR, modeEnum, tapeSpeedNorm, ageNorm);
             float highGrainR = vinylGrainR.process(blendedR, modeEnum, tapeSpeedNorm, ageNorm);
-            float combinedGrainR = midGrainR * (1.0f - ageNorm * 0.2f) + highGrainR * (0.30f + ageNorm * 0.70f);
+            float newsreelNoiseR = midGrainR * (1.0f - ageNorm * 0.2f) + highGrainR * (0.30f + ageNorm * 0.70f);
 
-            float intermodDepthR = (0.08f + ageNorm * 0.20f) * (0.3f + effTapeNoise * 0.7f);
+            float hissNoiseR = hissGrainR.process(blendedR, modeEnum, tapeSpeedNorm, 0.0f);
+
+            float combinedGrainR = (hissNoiseR * (1.0f - textureBlend)) + (newsreelNoiseR * textureBlend);
+
+            float intermodDepthR = (0.08f + ageNorm * 0.20f) * (0.3f + effTapeNoise * 0.7f) * textureBlend;
             float intermodR = 1.0f + combinedGrainR * intermodDepthR;
             blendedR *= intermodR;
 
-            float additiveNoiseR = combinedGrainR * noiseCurve * (0.45f + ageNorm * 0.15f);
-            float contactNoiseR = contactR.process(blendedR, currentAgeForScrape, effHum, modeEnum) * effTapeNoise;
+            float ageNoiseScaleR = (1.0f - textureBlend) * 0.45f + textureBlend * (0.45f + ageNorm * 0.15f);
+            float additiveNoiseR = combinedGrainR * noiseCurve * ageNoiseScaleR;
+            float contactNoiseR = contactR.process(blendedR, currentAgeForScrape, effHum, modeEnum) * effTapeNoise * textureBlend;
+            
             float rawNoiseSumR = (additiveNoiseR + humSample + contactNoiseR) * 0.6f;
             blendedR += noiseDecayFilterR.processSample(rawNoiseSumR);
         }
@@ -988,6 +1035,9 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
             const float absR = std::abs(wetR[i]);
             vuEnvR += (absR > vuEnvR ? meterAttackCoeff : meterReleaseCoeff) * (absR - vuEnvR);
         }
+
+        // Отправляем моно-сигнал в анализатор спектра
+        pushNextSampleIntoFifo (0.5f * (wetL[i] + (wetR != nullptr ? wetR[i] : wetL[i])));
     }
 
     auto linToVU = [](float lin) {
@@ -1004,30 +1054,46 @@ void DomRadioMasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     displayChannelDifference.store(channelDifference, std::memory_order_relaxed);
     displayArchiveMotion.store(juce::jlimit(0.0f, 1.0f, std::abs(displayWow.load(std::memory_order_relaxed)) * 0.35f + std::abs(displayFlutter.load(std::memory_order_relaxed)) * 0.25f + channelDifference), std::memory_order_relaxed);
     
-    const float signalPresence = juce::jlimit(0.0f, 1.0f, (vuEnvL + vuEnvR) * 0.707f * 3.0f); 
-    const float driveSatFactor = juce::jlimit(0.0f, 1.0f, (drive - 1.0f) / 5.0f);
-    const float ironSatFactor  = juce::jlimit(0.0f, 1.0f, ironCore * 1.5f);
-    const float slewSatFactor  = juce::jlimit(0.0f, 1.0f, (1.0f - transient) * 1.5f);
-    const float targetInputSat = juce::jlimit(0.0f, 1.0f, (driveSatFactor * 0.60f + ironSatFactor * 0.35f + slewSatFactor * 0.20f) * TroakarDSP::TapesDSP::harmonicDistortionTrim * signalPresence);
-    const float tapeDriveFactor = juce::jlimit(0.0f, 1.0f, tapeDriveRaw * 1.25f);
-    const float biasSatFactor   = juce::jlimit(0.0f, 0.5f, std::abs(tapeBias) * 1.2f);
-    const float profileSatMult  = 1.0f + (tapeProfile.oddHarmonics + tapeProfile.evenHarmonics) * 4.0f;
-    const float targetTapeSat = juce::jlimit(0.0f, 1.0f, (tapeDriveFactor * 0.75f + biasSatFactor * 0.25f) * profileSatMult * TroakarDSP::TapesDSP::harmonicDistortionTrim * signalPresence);
+    // =========================================================================
+    // ВЫСОКОЧУВСТВИТЕЛЬНЫЕ ДЕТЕКТОРЫ САTУРАЦИИ (АНАЛОГОВАЯ БАЛЛИСТИКА)
+    // =========================================================================
+    const float audioLevel = std::max(vuEnvL, vuEnvR);
+    // Высокая чувствительность к уровню входящего сигнала (даже на тихих мастер-треках)
+    const float signalPresence = juce::jlimit(0.0f, 1.0f, std::sqrt(audioLevel) * 1.75f);
 
-    // Быстрая "нервная" атака на транзиенты + плавное затухание
-    const float inCoeff   = (targetInputSat > inputSatEnvelope) ? 0.40f : 0.12f;
-    const float tapeCoeff = (targetTapeSat > tapeSatEnvelope)   ? 0.40f : 0.12f;
-    
-    const float targetSlewSat = juce::jlimit(0.0f, 1.0f, slewSatFactor * signalPresence * 2.2f);
-    const float slewCoeff = (targetSlewSat > slewSatEnvelope)   ? 0.50f : 0.15f;
+    // --- 1. INPUT / PREAMP SATURATION DETECTOR ---
+    // Реагирует на: Предусилитель (Drive), Железо (Iron Core) и Лимитирование (Slew)
+    const float driveSatFactor = juce::jlimit(0.0f, 1.0f, (drive - 1.0f) / 3.8f);
+    const float ironSatFactor  = juce::jlimit(0.0f, 1.0f, ironCore * 1.6f);
+    const float slewSatFactor  = juce::jlimit(0.0f, 1.0f, (1.0f - transient) * 2.0f);
+
+    // Суммируем уставки параметров и реальный замер физического THD волны
+    const float rawInputSat = (driveSatFactor * 0.55f + ironSatFactor * 0.30f + slewSatFactor * 0.25f) * signalPresence
+                            + (maxInAct * 2.4f * effMix);
+
+    // Психоакустическая гамма-кривая: дает видимый отклик уже от легкого насыщения
+    const float targetInputSat = juce::jlimit(0.0f, 1.0f, std::pow(juce::jlimit(0.0f, 1.0f, rawInputSat), 0.65f) * 1.25f);
+
+    // --- 2. TAPE CORE SATURATION DETECTOR ---
+    // Реагирует на: Tape Drive, перекос Bias, гармоники профиля ленты и компрессию
+    const float tapeDriveFactor = juce::jlimit(0.0f, 1.0f, tapeDriveRaw * 1.75f);
+    const float biasSatFactor   = juce::jlimit(0.0f, 0.6f, std::abs(tapeBias) * 1.5f);
+    const float profileSatMult  = 1.0f + (tapeProfile.oddHarmonics + tapeProfile.evenHarmonics) * 4.5f;
+
+    const float rawTapeSat = (tapeDriveFactor * 0.70f + biasSatFactor * 0.30f) * profileSatMult * signalPresence
+                           + (maxTpAct * 2.6f * effMix);
+
+    const float targetTapeSat = juce::jlimit(0.0f, 1.0f, std::pow(juce::jlimit(0.0f, 1.0f, rawTapeSat), 0.65f) * 1.25f);
+
+    // Баллистика: Мгновенный захват пиков (0.65) + плавный аналоговый спад (0.075)
+    const float inCoeff   = (targetInputSat > inputSatEnvelope) ? 0.65f : 0.075f;
+    const float tapeCoeff = (targetTapeSat > tapeSatEnvelope)   ? 0.65f : 0.075f;
 
     inputSatEnvelope += inCoeff * (targetInputSat - inputSatEnvelope);
     tapeSatEnvelope  += tapeCoeff * (targetTapeSat - tapeSatEnvelope);
-    slewSatEnvelope  += slewCoeff * (targetSlewSat - slewSatEnvelope);
 
-    inputSaturationLevel.store(inputSatEnvelope);
-    tapeSaturationLevel.store(tapeSatEnvelope);
-    slewSaturationLevel.store(slewSatEnvelope);
+    inputSaturationLevel.store(inputSatEnvelope, std::memory_order_relaxed);
+    tapeSaturationLevel.store(tapeSatEnvelope, std::memory_order_relaxed);
 }
 
 double DomRadioMasterAudioProcessor::getCompositeMagnitude(double frequency) const noexcept

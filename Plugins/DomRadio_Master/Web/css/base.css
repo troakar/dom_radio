@@ -1362,6 +1362,24 @@ body {
 }
 .noise-mode-control .control-label { margin-bottom: 0; }
 
+.noise-controls-group {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.trim-pot-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.trim-pot-control .control-label {
+    margin-bottom: 0 !important;
+    font-size: 7.5px !important;
+    color: #dad2c1 !important;
+}
+
 .mechlab-select-small {
     width: 102px;
 }

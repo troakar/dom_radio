@@ -132,12 +132,12 @@ public:
                 float bandGainDb = 0.0f;
                 if (mbEnvelope[i] < thresholdLin) {
                     float diff = (thresholdLin - mbEnvelope[i]) / thresholdLin;
-                    bandGainDb = std::pow(diff, 1.4f) * maxGainDb; 
+                    bandGainDb = (diff * diff * 0.6f + diff * 0.4f) * maxGainDb; 
                 }
 
                 avgGainDb += bandGainDb;
                 
-                const float linearGain = juce::Decibels::decibelsToGain(bandGainDb * weights[i] * rawAmount);
+                const float linearGain = std::exp(bandGainDb * weights[i] * rawAmount * 0.1151292546f);
                 detailSignal += b[i] * linearGain;
             }
 

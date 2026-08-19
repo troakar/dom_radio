@@ -106,8 +106,11 @@ public:
             return input;
         }
 
-        const double amount = 1.0 - static_cast<double>(transient);
-        const double compresity = std::pow(amount * 0.95, 2.0) * 8.0;
+        if (transient != currentTransient) {
+            currentTransient = transient;
+            double amount = 1.0 - static_cast<double>(transient);
+            compresity = (amount * 0.95) * (amount * 0.95) * 8.0;
+        }
 
         double diff1 = (dry - second) * overallscale;
         double diff2 = (second - third) * overallscale;
@@ -122,9 +125,9 @@ public:
         sustain *= hfMultiplier;
 
         double x = third;
-        double depthAmt = std::min(std::sin(std::min(sustain,
-                                                       juce::MathConstants<double>::halfPi))
-                                   * compresity, 9.0);
+        double clampSustain = std::min(sustain, 1.5707963268);
+        double sinApprox = clampSustain - (clampSustain * clampSustain * clampSustain * 0.1666667);
+        double depthAmt = std::min(sinApprox * compresity, 9.0);
         int depth = static_cast<int>(depthAmt);
         double trim = depthAmt - static_cast<double>(depth);
 
@@ -174,6 +177,8 @@ private:
     double second = 0.0, third = 0.0, sustain = 0.0;
     double overallscale = 1.0;
     int count = 0;
+    double currentTransient = -1.0;
+    double compresity = 0.0;
 };
 
 // --- Вспомогательная математика из ChowTape (Jiles-Atherton) ---
@@ -351,7 +356,9 @@ public:
         if (absIn < 1.0e-4f)
             return in;
 
-        const float shaped = std::sin(in * absIn) / absIn;
+        const float inSq = in * in;
+        const float inCube = inSq * in;
+        const float shaped = in - (inCube * inSq * 0.1666667f);
         float processed = in + (shaped - in) * TapesDSP::harmonicDistortionTrim * mixAmount;
         
         return processed; 
@@ -929,88 +936,37 @@ class TapeMechanics {
 public:
     static constexpr float baseDelaySec = 0.025f; // 25 мс статической задержки для PDC
 
-    void prepare(double sampleRate, int maximumBlockSize = 65536) 
+    void prepare(double sampleRate, int maximumBlockSize = 65536)
     {
         sr = sampleRate;
         juce::dsp::ProcessSpec spec { sampleRate, static_cast<juce::uint32>(maximumBlockSize), 1 };
 
-        delayLineLows.setMaximumDelayInSamples(static_cast<int>(sampleRate * 0.2));
-        delayLineLows.prepare(spec);
+        delayLine.setMaximumDelayInSamples(static_cast<int>(sampleRate * 0.1));
+        delayLine.prepare(spec);
+        reset();
+    }
 
-        delayLineHighs.setMaximumDelayInSamples(static_cast<int>(sampleRate * 0.2));
-        delayLineHighs.prepare(spec);
-
-        crossover.coefficients = juce::dsp::IIR::Coefficients<double>::makeFirstOrderHighPass(sampleRate, 250.0);
-        crossover.prepare(spec);
-
-        aziPhase = 0.0f;
-        smoothWowDepth = 0.0f;
-        smoothFlutterDepth = 0.0f;
-        smoothAzi   = 0.0f;
-        smoothCoeff = 1.0f - std::exp(-1.0f / static_cast<float>(sampleRate * 0.05));
-        lastAzimuthDepth = -1.0f;
-        lastAgeForAzimuth = -1.0f;
+    void reset()
+    {
+        delayLine.reset();
     }
 
     // TMT: подставить допуски
     void setTolerances(const ToleranceModel::ComponentTolerances* t) noexcept { tolerances = t; }
 
-    forcedinline float process(float input, float speedNorm, float mixDepth, float azimuthDepth, float age,
-                               bool isLeftChannel, const WowFlutterModulation& modulation) {
-        float highPassSample = static_cast<float>(crossover.processSample(static_cast<double>(input)));
-        float lowPassSample  = input - highPassSample;
-
-        const float ageNorm = juce::jlimit(0.0f, 1.0f, age / 50.0f);
-
-        // Отвязываем глубину Wow/Flutter от скорости ленты и её возраста.
-        // Теперь амплитуда детонации полностью изолирована и зависит ТОЛЬКО
-        // от ручек WOW и FLUTTER (их значения уже переданы внутри структуры modulation).
-        // Базовый коэффициент 0.0004f эквивалентен эталонной студийной машине.
-        const float wowDepth = 0.0075f * mixDepth;
-        const float flutterDepth = 0.0006f * mixDepth;
-
-        // Azimuth: убран дубль ageNorm
-        const float azimuthNorm = juce::jlimit(0.0f, 1.0f, azimuthDepth / 10.0f);
-        const float mixNorm = juce::jlimit(0.0f, 1.0f, mixDepth);
-        
-        // TMT: разброс azimuth амплитуды (+/-20%)
-        const float aziVar = tolerances ? tolerances->azimuthAmplitude : 1.0f;
-        const float targetAzi = 0.002f * azimuthNorm * ageNorm * mixNorm * aziVar;
-
-        smoothWowDepth += smoothCoeff * (wowDepth - smoothWowDepth);
-        smoothFlutterDepth += smoothCoeff * (flutterDepth - smoothFlutterDepth);
-        smoothAzi   += smoothCoeff * (targetAzi   - smoothAzi);
-
-        aziPhase += 0.1f / static_cast<float>(sr);
-        if (aziPhase >= 1.0f) aziPhase -= 1.0f;
-        float azi = isLeftChannel ? 0.0f
-                      : std::sin(aziPhase * juce::MathConstants<float>::twoPi) * smoothAzi;
-
-        // --- ИСПРАВЛЕНИЕ: Общая модуляция для предотвращения фазовой гребенки ---
-        const float commonModDelay = baseDelaySec + (modulation.wow * smoothWowDepth * 0.10f) + (modulation.flutter * smoothFlutterDepth);
-
-        delayLineLows.pushSample(0, lowPassSample);
-        const float lowDelaySamples = juce::jmax(0.0f, commonModDelay) * static_cast<float>(sr);
-        float processedLows = delayLineLows.popSample(0, lowDelaySamples);
-
-        delayLineHighs.pushSample(0, highPassSample);
-        // Азимут добавляется только к верхам (для моносовместимого стерео-расширения)
-        const float highDelaySamples = juce::jmax(0.0f, commonModDelay + azi) * static_cast<float>(sr);
-        float processedHighs = delayLineHighs.popSample(0, highDelaySamples);
-
-        return processedLows + processedHighs;
+    // Чистая монолитная интерполяция без кроссоверного деления полос -> НИКАКОГО ТРЕМОЛО!
+    forcedinline float process(float input, float totalModulationSeconds)
+    {
+        delayLine.pushSample(0, input);
+        const float totalDelaySec = baseDelaySec + totalModulationSeconds;
+        const float delaySamples = juce::jmax(0.0f, totalDelaySec) * static_cast<float>(sr);
+        return delayLine.popSample(0, delaySamples);
     }
 
 private:
-    // ОБЕ линии должны быть Lagrange3rd, иначе быстрая модуляция флаттера дает цифровой хрип!
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLineLows, delayLineHighs;
-    juce::dsp::IIR::Filter<double> crossover;
+    // Единая монолитная линия задержки с Lagrande-интерполяцией 3-го порядка
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine;
     double sr = 44100.0;
-    float aziPhase = 0.0f;
-    float smoothWowDepth = 0.0f, smoothFlutterDepth = 0.0f;
-    float smoothAzi = 0.0f, smoothCoeff = 0.001f;
-    float lastAzimuthDepth = -1.0f;
-    float lastAgeForAzimuth = -1.0f;
     const ToleranceModel::ComponentTolerances* tolerances = nullptr;
 };
 
@@ -1169,88 +1125,122 @@ class WowFlutterGenerator {
 public:
     void prepare(double sampleRate) {
         sr = sampleRate;
-        sqrtdelta = 1.0f / std::sqrt(static_cast<float>(sampleRate));
         T = 1.0f / static_cast<float>(sampleRate);
 
         driftY = 0.0f;
         wowMomentum = 0.0f;
 
-        phaseW = 0.0f;
-        phaseF1 = 0.0f; phaseF2 = 0.0f; phaseF3 = 0.0f;
+        phaseCapstan = 0.0f;
+        phaseReel = 0.0f;
+        phaseF1 = 0.0f;
+        phaseF2 = 0.0f;
+        phaseF3 = 0.0f;
+        aziPhase = 0.0f;
 
         driftLpf.prepare(sampleRate);
-        driftLpf.setLowPass(10.0, 0.707); // 10 Hz LPF
+        driftLpf.setLowPass(4.0, 0.707);
     }
 
     void setSeed(uint32_t seed) { rng.setSeed(seed); }
 
     void setTolerances(const ToleranceModel::ComponentTolerances* t) noexcept { tolerances = t; }
 
-    forcedinline WowFlutterModulation generate(float speedNorm, float wowAmount, float flutterAmount) {
-        const float wowScale = juce::jlimit(0.0f, 1.0f, wowAmount);
-        const float flutterScale = juce::jlimit(0.0f, 1.0f, flutterAmount);
+    struct TransportModulation
+    {
+        float commonDelaySec = 0.0f;
+        float azimuthDelaySec = 0.0f;
+        float displayWow = 0.0f;
+        float displayFlutter = 0.0f;
+    };
 
-        // --- 1. WOW: Ornstein-Uhlenbeck Process + LFO ---
-        float rawGaussian = (rng.nextFloat() + rng.nextFloat() + rng.nextFloat() + rng.nextFloat() - 2.0f) * 1.732f;
-        float filteredGaussian = driftLpf.processSample(rawGaussian);
+    forcedinline TransportModulation generate(float speedNorm, float wowAmount, float flutterAmount, float azimuthAmount, float age, float mixDepth) 
+    {
+        const float wowScale = juce::jlimit(0.0f, 1.0f, wowAmount) * mixDepth;
+        const float flutterScale = juce::jlimit(0.0f, 1.0f, flutterAmount) * mixDepth;
+        const float ageNorm = juce::jlimit(0.0f, 1.0f, age / 50.0f);
 
-        float damping = (wowScale * 20.0f) + 1.0f;
-        driftY += sqrtdelta * filteredGaussian * (wowScale * 0.8f);
-        driftY += damping * (wowScale - driftY) * T; 
-
-        const float wowFreqVar = tolerances ? tolerances->wowFrequencyDrift : 1.0f;
+        // =========================================================================
+        // 1. WOW: Плывучесть тонвала + эксцентриситет бобины + стохастический дрейф
+        // =========================================================================
         const float speedIps = TapesDSP::speedNormToIps(speedNorm);
         const float speedScale = juce::jlimit(0.125f, 1.0f, speedIps / 15.0f);
         const float speedRoot = std::sqrt(speedScale);
 
-        const float wowFreq = (0.32f + speedRoot * 0.48f) * wowFreqVar;
-        phaseW += wowFreq * T;
-        if (phaseW >= 1.0f) phaseW -= 1.0f;
-        const float wowPeriodic = std::sin(phaseW * juce::MathConstants<float>::twoPi) * 0.4f * wowScale;
+        // Случайный розовый дрейф натяжения
+        float rawNoise = (rng.nextFloat() + rng.nextFloat() - 1.0f);
+        float filteredDrift = driftLpf.processSample(rawNoise);
+        driftY += (filteredDrift * 1.5f - driftY) * (3.0f * T);
 
-        // [ИЗМЕНЕНИЕ]: Умножаем сумму периодического LFO и хаотичного дрейфа на 1.90f
-        // Это сделает "плавание" питча значительно более выраженным на максимальных значениях ручки
-        const float wowTarget = (wowPeriodic + juce::jlimit(-2.0f, 2.0f, driftY - wowScale)) * 1.90f;
-        const float inertia = 0.82f + speedNorm * 0.10f;
+        // Основной тонвал (0.55 - 1.4 Гц)
+        const float capstanFreq = (0.55f + speedRoot * 0.85f);
+        phaseCapstan += capstanFreq * T;
+        if (phaseCapstan >= 1.0f) phaseCapstan -= 1.0f;
+        const float capstanWave = std::sin(phaseCapstan * juce::MathConstants<float>::twoPi);
+
+        // Медленный кач бобины (0.18 - 0.40 Гц)
+        const float reelFreq = (0.18f + speedRoot * 0.22f);
+        phaseReel += reelFreq * T;
+        if (phaseReel >= 1.0f) phaseReel -= 1.0f;
+        const float reelWave = std::sin(phaseReel * juce::MathConstants<float>::twoPi);
+
+        // Суммарный Wow-профиль (инерционная лента)
+        const float wowTarget = (capstanWave * 0.65f + reelWave * 0.35f + driftY * 0.45f);
+        const float inertia = 0.92f;
         wowMomentum = inertia * wowMomentum + (1.0f - inertia) * wowTarget;
 
-        // --- 2. FLUTTER: CHOW TAPE SIMPLIFIED ---
+        // Максимальная глубина Wow: ~1.8 миллисекунды (сочный глубокий плывущий тон)
+        const float maxWowSec = 0.0018f;
+        const float finalWowDelay = wowMomentum * wowScale * maxWowSec;
+
+        // =========================================================================
+        // 2. FLUTTER: Спектральная вибрация роликов (8 - 18 Гц) БЕЗ АМПЛИТУДНЫХ ИСКАЖЕНИЙ
+        // =========================================================================
         const float flutterFreqVar = tolerances ? tolerances->flutterFrequencyDrift : 1.0f;
-        // [ИЗМЕНЕНИЕ 1]: Уменьшаем частоту флаттера на 20% (множитель 0.80f)
-        // Теперь флаттер звучит не как механическое "жужжание", а как быстрое, но читаемое дрожание ленты
-        const float flutterBaseFreq = (7.0f + speedRoot * 20.0f) * flutterFreqVar * 0.80f;
+        const float fBase = (8.5f + speedRoot * 9.5f) * flutterFreqVar; // 8.5 - 18 Гц
+        constexpr float twoPi = juce::MathConstants<float>::twoPi;
 
-        const float dTheta1 = juce::MathConstants<float>::twoPi * flutterBaseFreq * T;
-        
-        // Надежно кольцуем фазы, чтобы они не улетали в бесконечность
-        phaseF1 = std::fmod(phaseF1 + dTheta1, juce::MathConstants<float>::twoPi);
-        phaseF2 = std::fmod(phaseF2 + 2.0f * dTheta1, juce::MathConstants<float>::twoPi);
-        phaseF3 = std::fmod(phaseF3 + 3.0f * dTheta1, juce::MathConstants<float>::twoPi);
+        phaseF1 += (fBase * 1.0f) * twoPi * T; if (phaseF1 >= twoPi) phaseF1 -= twoPi;
+        phaseF2 += (fBase * 1.73f) * twoPi * T; if (phaseF2 >= twoPi) phaseF2 -= twoPi;
+        phaseF3 += (fBase * 2.41f) * twoPi * T; if (phaseF3 >= twoPi) phaseF3 -= twoPi;
 
-        const float off2 = 13.0f * juce::MathConstants<float>::pi / 4.0f;
-        const float off3 = -juce::MathConstants<float>::pi / 10.0f;
+        // Трехточечный негармонический резонанс механизма
+        const float flutterWave = (std::sin(phaseF1) * 0.60f +
+                                   std::sin(phaseF2) * 0.28f +
+                                   std::sin(phaseF3) * 0.12f);
 
-        // ИСПОЛЬЗУЕМ СТРОГО std::cos! FastMath падает от фаз > pi и взрывает DelayLine!
-        const float complexFlutter = (-0.230f * std::cos(phaseF1)) +
-                                     (-0.080f * std::cos(phaseF2 + off2)) +
-                                     (-0.099f * std::cos(phaseF3 + off3));
+        // Максимальная глубина Flutter: 75 микросекунд (0.000075 с)
+        const float maxFlutterSec = 0.000075f;
+        const float finalFlutterDelay = flutterWave * flutterScale * maxFlutterSec;
 
-        // [ИЗМЕНЕНИЕ 2]: Уменьшаем силу влияния на 50% (множитель снижен с 3.5f до 1.75f)
-        // Теперь даже на 100% ручка Flutter не будет превращать звук в "кашу"
-        const float finalFlutter = complexFlutter * flutterScale * 1.75f;
+        // =========================================================================
+        // 3. AZIMUTH: Медленный микро-сдвиг между дорожками L и R (0 - 35 мкс)
+        // =========================================================================
+        const float azimuthNorm = juce::jlimit(0.0f, 1.0f, azimuthAmount / 10.0f) * mixDepth;
+        aziPhase += (0.08f + ageNorm * 0.12f) * T;
+        if (aziPhase >= 1.0f) aziPhase -= 1.0f;
 
-        return { wowMomentum, finalFlutter };
+        const float aziSine = std::sin(aziPhase * twoPi);
+        const float aziVar = tolerances ? tolerances->azimuthAmplitude : 1.0f;
+        const float finalAzimuthDelay = aziSine * (0.000035f * azimuthNorm * (0.3f + ageNorm * 0.7f) * aziVar);
+
+        TransportModulation mod;
+        mod.commonDelaySec = finalWowDelay + finalFlutterDelay;
+        mod.azimuthDelaySec = finalAzimuthDelay;
+        mod.displayWow = wowMomentum * (juce::jlimit(0.0f, 1.0f, wowAmount) * mixDepth);
+        mod.displayFlutter = flutterWave * (juce::jlimit(0.0f, 1.0f, flutterAmount) * mixDepth);
+
+        return mod;
     }
 
 private:
     double sr = 44100.0;
-    float sqrtdelta = 1.0f;
-    float T = 1.0f;
+    float T = 1.0f / 44100.0f;
     float driftY = 0.0f;
-    float wowMomentum = 0.0f; 
-    float phaseW = 0.0f;
+    float wowMomentum = 0.0f;
+    float phaseCapstan = 0.0f, phaseReel = 0.0f;
     float phaseF1 = 0.0f, phaseF2 = 0.0f, phaseF3 = 0.0f;
-    FastBiquad driftLpf; 
+    float aziPhase = 0.0f;
+    FastBiquad driftLpf;
     FastRandom rng { 1984 };
     const ToleranceModel::ComponentTolerances* tolerances = nullptr;
 };

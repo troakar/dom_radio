@@ -59,6 +59,12 @@ public:
     double getEmphasisMagnitude(double frequency) const noexcept;
     double getProcessingLatencySamples() const noexcept;
 
+    void getSpectrumData (float* destinationArray, int numBins) const noexcept
+    {
+        for (int i = 0; i < numBins; ++i)
+            destinationArray[i] = displaySpectrum[i].load (std::memory_order_relaxed);
+    }
+
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
     const juce::String getName() const override { return "DOM RADIO MECHLABOR 610"; }
@@ -158,6 +164,7 @@ private:
     TroakarDSP::DCBlocker finalDcBlockL, finalDcBlockR;
     TroakarDSP::ArchivalGrainPlayer velvetGrainL, velvetGrainR;
     TroakarDSP::ArchivalGrainPlayer vinylGrainL, vinylGrainR;
+    TroakarDSP::ArchivalGrainPlayer hissGrainL, hissGrainR;
     TroakarDSP::ContactNoise contactL, contactR;
     TroakarDSP::FastBiquad noiseDecayFilterL, noiseDecayFilterR;
     
@@ -193,7 +200,7 @@ private:
 
     juce::SmoothedValue<float> inputGainSmoothed, driveSmoothed, tapeDriveSmoothed, transientSmoothed;
     juce::SmoothedValue<float> tapeSpeedSmoothed, biasSmoothed, airSmoothed, decaySmoothed;
-    juce::SmoothedValue<float> bassSmoothed, trebleSmoothed, mixSmoothed, ageSmoothed, humSmoothed, tapeNoiseSmoothed;
+    juce::SmoothedValue<float> bassSmoothed, trebleSmoothed, mixSmoothed, ageSmoothed, humSmoothed, tapeNoiseSmoothed, noiseProfileSmoothed;
     juce::SmoothedValue<float> bassFrequencySmoothed, trebleFrequencySmoothed;
     juce::SmoothedValue<float> oxideSmoothed, azimuthSmoothed, outputGainSmoothed;
     juce::SmoothedValue<float> wowAmountSmoothed, flutterAmountSmoothed, biasSagSmoothed;
@@ -232,6 +239,7 @@ private:
     std::atomic<float>* mixParam = nullptr;
     std::atomic<float>* ageParam = nullptr;
     std::atomic<float>* noiseModeParam = nullptr;
+    std::atomic<float>* noiseProfileParam = nullptr;
     std::atomic<float>* humParam = nullptr;
     std::atomic<float>* tapeNoiseParam = nullptr;
     std::atomic<float>* oxideParam = nullptr;
@@ -248,6 +256,54 @@ private:
     std::atomic<float>* detailAmountParam = nullptr;
     std::atomic<float>* detailTiltParam = nullptr;
     std::atomic<float>* detailAlgoParam = nullptr;
+
+    // --- FFT REALTIME ANALYZER ---
+    static constexpr int fftOrder = 9;
+    static constexpr int fftSize  = 1 << fftOrder;
+    juce::dsp::FFT forwardFFT { fftOrder };
+    juce::dsp::WindowingFunction<float> fftWindow { fftSize, juce::dsp::WindowingFunction<float>::hann };
+    float fftFifo[fftSize] = { 0.0f };
+    float fftData[2 * fftSize] = { 0.0f };
+    int fftFifoIndex = 0;
+    static constexpr int numSpectrumBins = 48;
+    std::atomic<float> displaySpectrum[numSpectrumBins];
+
+    void pushNextSampleIntoFifo (float sample) noexcept
+    {
+        if (fftFifoIndex == fftSize)
+        {
+            std::fill (std::begin (fftData), std::end (fftData), 0.0f);
+            std::copy (fftFifo, fftFifo + fftSize, fftData);
+            fftWindow.multiplyWithWindowingTable (fftData, fftSize);
+            forwardFFT.performFrequencyOnlyForwardTransform (fftData);
+
+            constexpr float minFreq = 25.0f;
+            constexpr float maxFreq = 20000.0f;
+            const float binWidth = static_cast<float> (currentSampleRate) / static_cast<float> (fftSize);
+
+            for (int b = 0; b < numSpectrumBins; ++b)
+            {
+                const float fLow = minFreq * std::pow (maxFreq / minFreq, static_cast<float> (b) / static_cast<float> (numSpectrumBins));
+                const float fHigh = minFreq * std::pow (maxFreq / minFreq, static_cast<float> (b + 1) / static_cast<float> (numSpectrumBins));
+                const int iLow = juce::jlimit (0, fftSize / 2 - 1, static_cast<int> (fLow / binWidth));
+                const int iHigh = juce::jlimit (iLow + 1, fftSize / 2, static_cast<int> (fHigh / binWidth) + 1);
+
+                float magMax = 0.0f;
+                for (int i = iLow; i < iHigh; ++i)
+                    magMax = juce::jmax (magMax, fftData[i]);
+
+                const float db = juce::Decibels::gainToDecibels (magMax / (fftSize * 0.18f), -60.0f);
+                const float norm = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
+
+                const float current = displaySpectrum[b].load (std::memory_order_relaxed);
+                displaySpectrum[b].store (juce::jmax (norm, current * 0.85f), std::memory_order_relaxed);
+            }
+
+            fftFifoIndex = 0;
+        }
+
+        fftFifo[fftFifoIndex++] = sample;
+    }
 
 public:
     bool eqMonitorExpanded = false;
