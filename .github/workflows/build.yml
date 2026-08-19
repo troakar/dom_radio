@@ -28,14 +28,13 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: microsoft/setup-msbuild@v2
 
-      # 2.1 Установка WebView2 SDK для Windows
+      # 2.1 Установка WebView2 SDK в системный NuGet кэш
       - name: Install WebView2 SDK (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          nuget install Microsoft.Web.WebView2 -OutputDirectory packages
-          $pkg = Get-ChildItem -Directory -Path packages -Filter "Microsoft.Web.WebView2*" | Select-Object -First 1
-          echo "JUCE_WEBVIEW2_DIR=$($pkg.FullName)" >> $env:GITHUB_ENV
+          nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory "$HOME\.nuget\packages"
+          nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory "packages"
 
       # 3. Конфигурация CMake
       - name: Configure CMake (macOS)
@@ -44,7 +43,7 @@ jobs:
 
       - name: Configure CMake (Windows)
         if: matrix.os == 'windows-latest'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DJUCE_WEBVIEW2_PACKAGE_LOCATION="${{ env.JUCE_WEBVIEW2_DIR }}"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       # 4. Сборка плагинов
       - name: Build

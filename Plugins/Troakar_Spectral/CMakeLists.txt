@@ -57,12 +57,19 @@ target_sources(TroakarSpectral PRIVATE
     ${CMAKE_SOURCE_DIR}/Shared/UI/RetroFX.h
 )
 
-target_compile_definitions(TroakarSpectral PUBLIC
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_WEB_BROWSER=1
-    JUCE_USE_WIN_WEBVIEW2=1
-    JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
-)
+if(WIN32)
+    target_compile_definitions(TroakarSpectral PRIVATE
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_WEB_BROWSER=1
+        JUCE_USE_WIN_WEBVIEW2=1
+        JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
+    )
+else()
+    target_compile_definitions(TroakarSpectral PRIVATE
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_WEB_BROWSER=1
+    )
+endif()
 
 target_link_libraries(TroakarSpectral PRIVATE
     juce::juce_audio_plugin_client
