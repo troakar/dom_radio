@@ -28,13 +28,19 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: microsoft/setup-msbuild@v2
 
-      # 2.1 Установка WebView2 SDK в системный NuGet кэш
+      # 2.1 Официальная установка WebView2 для JUCE
       - name: Install WebView2 SDK (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory "$HOME\.nuget\packages"
-          nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory "packages"
+          # 1. Установка через официальный провайдер PowerShell (куда смотрит FindWebView2.cmake)
+          Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force -ErrorAction SilentlyContinue
+          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -Source nugetRepository -Force
+
+          # 2. Дублирующая установка локально и подготовка пути для CMake (с прямыми слэшами '/')
+          nuget install Microsoft.Web.WebView2 -OutputDirectory packages
+          $pkgPath = (Get-ChildItem -Directory -Path packages -Filter "Microsoft.Web.WebView2*").FullName.Replace('\', '/')
+          echo "JUCE_WEBVIEW2_DIR=$pkgPath" >> $env:GITHUB_ENV
 
       # 3. Конфигурация CMake
       - name: Configure CMake (macOS)
@@ -43,7 +49,7 @@ jobs:
 
       - name: Configure CMake (Windows)
         if: matrix.os == 'windows-latest'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DJUCE_WEBVIEW2_PACKAGE_LOCATION="${{ env.JUCE_WEBVIEW2_DIR }}"
 
       # 4. Сборка плагинов
       - name: Build
