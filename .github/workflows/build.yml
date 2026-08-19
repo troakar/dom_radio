@@ -5,7 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # Позволяет запускать сборку вручную одной кнопкой на GitHub
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,50 +14,54 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Сборка сразу на двух платформах: macOS и Windows
         os: [macos-latest, windows-latest]
 
     steps:
-      # 1. Клонируем ваш репозиторий. Параметр submodules: recursive 
-      # гарантирует, что JUCE и foleys_gui_magic скачаются, даже если это сабмодули.
+      # 1. Клонирование репозитория с сабмодулями
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # 2. Настраиваем окружение MSBuild для компиляции под Windows
+      # 2. Настройка MSBuild для Windows
       - name: Set up MSBuild (Windows)
         if: matrix.os == 'windows-latest'
         uses: microsoft/setup-msbuild@v2
 
+      # 2.1 Установка WebView2 SDK для Windows
+      - name: Install WebView2 SDK (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          nuget install Microsoft.Web.WebView2 -OutputDirectory packages
+          $pkg = Get-ChildItem -Directory -Path packages -Filter "Microsoft.Web.WebView2*" | Select-Object -First 1
+          echo "JUCE_WEBVIEW2_DIR=$($pkg.FullName)" >> $env:GITHUB_ENV
+
       # 3. Конфигурация CMake
-      # На Mac собираем Universal Binary (arm64 для M1-M4 + x86_64 для Intel)
-      # Используется одна конфигурация для обеих платформ (без -config)
       - name: Configure CMake (macOS)
         if: matrix.os == 'macos-latest'
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
 
       - name: Configure CMake (Windows)
         if: matrix.os == 'windows-latest'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DJUCE_WEBVIEW2_PACKAGE_LOCATION="${{ env.JUCE_WEBVIEW2_DIR }}"
 
-      # 4. Сборка всех форматов (VST3, AU, Standalone)
+      # 4. Сборка плагинов
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
-      # 5. Упаковка артефактов macOS (VST3, AU/Component, Standalone App)
-      # find ищет без фильтра пути Release, т.к. Unix Makefiles одноконфигурационный
+      # 5. Упаковка артефактов macOS (VST3, AU, App)
       - name: Package macOS Artifacts
         if: matrix.os == 'macos-latest'
         run: |
           mkdir -p dist/mac
-          find build -type d -name "*.vst3" -exec cp -R {} dist/mac/ \;
-          find build -type d -name "*.component" -exec cp -R {} dist/mac/ \;
-          find build -type d -name "*.app" -exec cp -R {} dist/mac/ \;
+          find build -name "*.vst3" -type d -maxdepth 4 -exec cp -R {} dist/mac/ \;
+          find build -name "*.component" -type d -maxdepth 4 -exec cp -R {} dist/mac/ \;
+          find build -name "*.app" -type d -maxdepth 4 -exec cp -R {} dist/mac/ \;
           cd dist
           zip -r ../dom-radio-mac.zip mac
 
-      # 6. Отправляем ZIP-архив macOS на сервер GitHub в качестве артефакта сборки
+      # 6. Загрузка архива macOS
       - name: Upload macOS Artifacts
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
@@ -65,18 +69,17 @@ jobs:
           name: dom-radio-mac
           path: dom-radio-mac.zip
 
-      # 7. Собираем готовые плагины для Windows (VST3 и Standalone .exe)
-      # JUCE CMake использует мультиконфигурационный генератор, artefacts идут в *_artefacts/Release
+      # 7. Упаковка артефактов Windows (VST3 и .exe)
       - name: Package Windows Artifacts
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/win
-          Get-ChildItem -Path build -Recurse -Directory -Filter "*.vst3" | Where-Object { $_.Parent.Name -eq "Release" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Recurse -Force }
-          Get-ChildItem -Path build -Recurse -File -Filter "*.exe" | Where-Object { $_.Parent.Name -eq "Release" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Force }
+          Get-ChildItem -Path build -Recurse -Directory -Filter "*.vst3" | Where-Object { $_.FullName -notmatch "_artefacts" -or $_.Parent.Name -eq "VST3" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Recurse -Force }
+          Get-ChildItem -Path build -Recurse -File -Filter "*.exe" | Where-Object { $_.FullName -match "Standalone" -or $_.Name -notmatch "vstest" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Force }
           Compress-Archive -Path dist/win -DestinationPath dom-radio-win.zip
 
-      # 8. Отправляем ZIP-архив Windows на сервер GitHub
+      # 8. Загрузка архива Windows
       - name: Upload Windows Artifacts
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
