@@ -3,6 +3,7 @@
 
 namespace
 {
+#if JUCE_WINDOWS
     juce::File getWebView2DataFolder()
     {
         auto folder =
@@ -15,6 +16,7 @@ namespace
         folder.createDirectory();
         return folder;
     }
+#endif
 
     constexpr int logicalEditorWidth  = 960;
     constexpr int logicalEditorHeight = 455;
@@ -39,10 +41,12 @@ DomRadioMasterAudioProcessorEditor (
     using Options = WebBrowser::Options;
 
     auto options = Options {}
+#if JUCE_WINDOWS
         .withBackend (Options::Backend::webview2)
         .withWinWebView2Options (
             Options::WinWebView2{}
                 .withUserDataFolder (getWebView2DataFolder()))
+#endif
         .withNativeIntegrationEnabled()
         .withResourceProvider (
             [this] (const juce::String& path)

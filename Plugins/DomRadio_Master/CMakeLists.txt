@@ -66,12 +66,19 @@ target_sources(DomRadioMaster PRIVATE
     ${CMAKE_SOURCE_DIR}/Shared/UI/RetroFX.h
 )
 
-target_compile_definitions(DomRadioMaster PRIVATE
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_WEB_BROWSER=1
-    JUCE_USE_WIN_WEBVIEW2=1
-    JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
-)
+if(WIN32)
+    target_compile_definitions(DomRadioMaster PRIVATE
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_WEB_BROWSER=1
+        JUCE_USE_WIN_WEBVIEW2=1
+        JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
+    )
+else()
+    target_compile_definitions(DomRadioMaster PRIVATE
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_WEB_BROWSER=1
+    )
+endif()
 
 target_link_libraries(DomRadioMaster PRIVATE
     juce::juce_audio_utils
@@ -88,10 +95,12 @@ if(WIN32 AND TARGET DomRadioMaster_VST3)
     )
 endif()
 
-enable_testing()
-add_test(NAME pluginval
-    COMMAND pluginval --strictness-level 10 --validate
-        "$<TARGET_FILE:DomRadioMaster_VST3>"
-)
+if(BUILD_TESTING)
+    enable_testing()
+    add_test(NAME pluginval
+        COMMAND pluginval --strictness-level 10 --validate
+            "$<TARGET_FILE:DomRadioMaster_VST3>"
+    )
+endif()
 
 target_compile_features(DomRadioMaster PUBLIC cxx_std_17)

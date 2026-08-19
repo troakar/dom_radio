@@ -30,22 +30,30 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: microsoft/setup-msbuild@v2
 
-      # 3. Конфигурируем CMake одной строкой (безопасно для Windows PowerShell и macOS Bash)
-      - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.os == 'macos-latest' && '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"' || '' }}
+      # 3. Конфигурация CMake
+      # На Mac собираем Universal Binary (arm64 для M1-M4 + x86_64 для Intel)
+      # Используется одна конфигурация для обеих платформ (без -config)
+      - name: Configure CMake (macOS)
+        if: matrix.os == 'macos-latest'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
 
-      # 4. Запускаем компиляцию в многопоточном режиме (Release)
+      - name: Configure CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      # 4. Сборка всех форматов (VST3, AU, Standalone)
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
-      # 5. Собираем готовые плагины для macOS в архив (собираем VST3, AU/component и Standalone)
+      # 5. Упаковка артефактов macOS (VST3, AU/Component, Standalone App)
+      # find ищет без фильтра пути Release, т.к. Unix Makefiles одноконфигурационный
       - name: Package macOS Artifacts
         if: matrix.os == 'macos-latest'
         run: |
           mkdir -p dist/mac
-          find build -type d -name "*.vst3" -path "*/Release/*" -exec cp -R {} dist/mac/ \;
-          find build -type d -name "*.component" -path "*/Release/*" -exec cp -R {} dist/mac/ \;
-          find build -type d -name "*.app" -path "*/Release/*" -exec cp -R {} dist/mac/ \;
+          find build -type d -name "*.vst3" -exec cp -R {} dist/mac/ \;
+          find build -type d -name "*.component" -exec cp -R {} dist/mac/ \;
+          find build -type d -name "*.app" -exec cp -R {} dist/mac/ \;
           cd dist
           zip -r ../dom-radio-mac.zip mac
 
@@ -57,14 +65,15 @@ jobs:
           name: dom-radio-mac
           path: dom-radio-mac.zip
 
-      # 7. Собираем готовые плагины для Windows (VST3 и Standalone .exe) с фильтрацией родительских папок
+      # 7. Собираем готовые плагины для Windows (VST3 и Standalone .exe)
+      # JUCE CMake использует мультиконфигурационный генератор, artefacts идут в *_artefacts/Release
       - name: Package Windows Artifacts
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/win
-          Get-ChildItem -Path build -Recurse -Directory -Filter "*.vst3" | Where-Object { $_.Parent.Name -eq "VST3" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Recurse -Force }
-          Get-ChildItem -Path build -Recurse -File -Filter "*.exe" | Where-Object { $_.Parent.Name -eq "Standalone" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Force }
+          Get-ChildItem -Path build -Recurse -Directory -Filter "*.vst3" | Where-Object { $_.Parent.Name -eq "Release" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Recurse -Force }
+          Get-ChildItem -Path build -Recurse -File -Filter "*.exe" | Where-Object { $_.Parent.Name -eq "Release" } | ForEach-Object { Copy-Item -Path $_.FullName -Destination dist/win -Force }
           Compress-Archive -Path dist/win -DestinationPath dom-radio-win.zip
 
       # 8. Отправляем ZIP-архив Windows на сервер GitHub
